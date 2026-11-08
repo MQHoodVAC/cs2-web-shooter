@@ -1,0 +1,15 @@
+{
+  "name": "cs2-web-strike-dedicated-server",
+  "version": "1.0.0",
+  "description": "Dedicated WebSocket & HTTP Server for CS2 Web Strike 3D Shooter",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

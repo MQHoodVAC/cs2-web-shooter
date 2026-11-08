@@ -1,0 +1,3793 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS2 Web Strike — 3D Tactical Online Shooter</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js r128 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Dedicated WebSocket Server Client (Native WebSockets — No P2P NAT Issues) -->
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --cs-orange: #de9b35;
+            --cs-blue: #5d79ae;
+            --cs-dark: rgba(13, 17, 23, 0.90);
+        }
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #090d14;
+            font-family: 'Inter', sans-serif;
+            color: #f3f4f6;
+        }
+        .font-tactical {
+            font-family: 'Rajdhani', sans-serif;
+        }
+        .font-mono-code {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        #game-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            z-index: 1;
+        }
+        /* CS2 Panorama Glassmorphism */
+        .cs2-panel {
+            background: linear-gradient(145deg, rgba(20, 26, 36, 0.94), rgba(11, 15, 22, 0.97));
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75);
+        }
+        .cs2-hud-box {
+            background: linear-gradient(90deg, rgba(12, 16, 23, 0.86) 0%, rgba(18, 24, 34, 0.72) 100%);
+            backdrop-filter: blur(6px);
+            border-bottom: 2px solid rgba(222, 155, 53, 0.85);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.4);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(222, 155, 53, 0.8);
+        }
+        /* Damage Red Vignette */
+        #damage-vignette {
+            pointer-events: none;
+            transition: opacity 0.18s ease-out;
+            background: radial-gradient(circle, transparent 40%, rgba(220, 38, 38, 0.72) 100%);
+        }
+        /* Red-Black Death Screen Filter */
+        #death-screen-overlay {
+            pointer-events: none;
+            transition: opacity 0.35s ease-out;
+            background:
+                radial-gradient(circle at center, rgba(140, 15, 20, 0.48) 0%, rgba(45, 5, 8, 0.85) 65%, rgba(5, 2, 3, 0.96) 100%),
+                linear-gradient(180deg, rgba(0, 0, 0, 0.65) 0%, rgba(120, 12, 16, 0.35) 50%, rgba(0, 0, 0, 0.85) 100%);
+            backdrop-filter: grayscale(45%) contrast(125%);
+        }
+        /* Kill / Headshot Flash */
+        #kill-flash {
+            pointer-events: none;
+            transition: opacity 0.25s ease-out;
+            background: radial-gradient(circle, rgba(56, 189, 248, 0.18) 0%, transparent 75%);
+        }
+        /* Floating combat text animation */
+        @keyframes floatUpFade {
+            0% { transform: translateY(0) scale(1); opacity: 1; }
+            100% { transform: translateY(-42px) scale(1.18); opacity: 0; }
+        }
+        .floating-dmg {
+            position: absolute;
+            pointer-events: none;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 800;
+            text-shadow: 0 2px 6px rgba(0,0,0,0.95);
+            animation: floatUpFade 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            z-index: 25;
+        }
+        @keyframes slideInRight {
+            0% { transform: translateX(30px); opacity: 0; }
+            100% { transform: translateX(0); opacity: 1; }
+        }
+        .killfeed-item {
+            animation: slideInRight 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        input[type="range"] {
+            accent-color: #de9b35;
+        }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+
+    <!-- 3D WebGL Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Screen Overlays (Damage, Death Red-Black Screen & Kill Feedback) -->
+    <div id="damage-vignette" class="fixed inset-0 z-10 opacity-0"></div>
+    <div id="death-screen-overlay" class="fixed inset-0 z-10 opacity-0"></div>
+    <div id="kill-flash" class="fixed inset-0 z-10 opacity-0"></div>
+    <div id="floating-dmg-container" class="fixed inset-0 z-20 pointer-events-none overflow-hidden"></div>
+
+    <!-- ========================================== -->
+    <!-- IN-GAME HUD (CS2 PANORAMA STYLE)           -->
+    <!-- ========================================== -->
+    <div id="hud-layer" class="fixed inset-0 z-20 pointer-events-none hidden">
+        
+        <!-- Top Bar: Match Scoreboard & Quick Telemetry -->
+        <div class="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-3">
+            <!-- CT Score / Player -->
+            <div class="cs2-hud-box px-4 py-1.5 rounded-l-lg flex items-center gap-3 border-b-2 border-sky-400">
+                <div class="text-right">
+                    <div id="hud-local-name" class="text-xs font-bold uppercase tracking-wider text-sky-300">ВЫ (СПЕЦНАЗ)</div>
+                    <div class="text-[11px] text-slate-400 font-mono-code">K/D: <span id="hud-kills" class="text-white font-bold">0</span> / <span id="hud-deaths" class="text-slate-300">0</span></div>
+                </div>
+                <div id="hud-score-local" class="font-tactical text-3xl font-extrabold text-sky-400 leading-none">0</div>
+            </div>
+
+            <!-- Center Round / Room Info -->
+            <div class="bg-slate-950/90 border border-white/10 px-3 py-1 rounded text-center shadow-lg">
+                <div id="hud-room-badge" class="font-mono-code text-xs font-bold text-amber-400 tracking-widest">SOLO / BOT</div>
+                <div class="text-[10px] text-slate-400 flex items-center justify-center gap-2 mt-0.5">
+                    <span>PING: <b id="hud-ping" class="text-emerald-400">0 ms</b></span>
+                    <span>•</span>
+                    <span>FPS: <b id="hud-fps" class="text-white">60</b> <span id="hud-fps-cap" class="text-[9px] text-amber-400/90 font-mono-code">(360)</span></span>
+                </div>
+            </div>
+
+            <!-- T Score / Opponent -->
+            <div class="cs2-hud-box px-4 py-1.5 rounded-r-lg flex items-center gap-3 border-b-2 border-amber-500">
+                <div id="hud-score-enemy" class="font-tactical text-3xl font-extrabold text-amber-400 leading-none">0</div>
+                <div class="text-left">
+                    <div id="hud-enemy-name" class="text-xs font-bold uppercase tracking-wider text-amber-300">BOT_АЛЕКСЕЙ</div>
+                    <div id="hud-enemy-status" class="text-[11px] text-emerald-400 font-mono-code">100 HP</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Left Controls Reminder & Debug Button -->
+        <div class="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-auto">
+            <div class="flex items-center gap-2">
+                <button id="btn-hud-debug" onclick="UI.toggleDebug()" class="bg-slate-900/85 hover:bg-slate-800 text-xs font-mono-code text-emerald-400 border border-emerald-500/40 px-2.5 py-1.5 rounded flex items-center gap-1.5 shadow transition">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    DEBUG [` / F3]
+                </button>
+                <button onclick="UI.openSettings()" class="bg-slate-900/85 hover:bg-slate-800 text-xs font-medium text-slate-200 border border-white/15 px-2.5 py-1.5 rounded shadow transition">
+                    ⚙ Настройки [P / ESC]
+                </button>
+            </div>
+            <div class="bg-slate-950/75 border border-white/10 px-2.5 py-1 rounded text-[11px] text-slate-300 font-mono-code">
+                [1] AK-47 • [2] USP-S • [3] Нож • [R] Перезарядка • [H] Рука • [F] Осмотр • [C] Присесть
+            </div>
+        </div>
+
+        <!-- Top Right ENLARGED Killfeed with Headshot Icon -->
+        <div id="killfeed-container" class="absolute top-3 right-4 flex flex-col items-end gap-2 w-[420px] max-w-[90vw]"></div>
+
+        <!-- Center Dynamic Crosshair (Reload Center Box Removed as requested) -->
+        <div id="crosshair-wrapper" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center">
+            <!-- Top line -->
+            <div id="ch-top" class="absolute bg-emerald-400 shadow-[0_0_2px_#000]"></div>
+            <!-- Bottom line -->
+            <div id="ch-bottom" class="absolute bg-emerald-400 shadow-[0_0_2px_#000]"></div>
+            <!-- Left line -->
+            <div id="ch-left" class="absolute bg-emerald-400 shadow-[0_0_2px_#000]"></div>
+            <!-- Right line -->
+            <div id="ch-right" class="absolute bg-emerald-400 shadow-[0_0_2px_#000]"></div>
+            <!-- Center dot -->
+            <div id="ch-dot" class="absolute bg-emerald-400 rounded-full shadow-[0_0_2px_#000] hidden"></div>
+
+            <!-- Hitmarker (X) -->
+            <div id="hitmarker" class="opacity-0 transition-opacity duration-75 relative w-7 h-7 flex items-center justify-center">
+                <div class="hit-line absolute w-3 h-[2px] bg-white rotate-45 -translate-x-1.5 -translate-y-1.5"></div>
+                <div class="hit-line absolute w-3 h-[2px] bg-white -rotate-45 translate-x-1.5 -translate-y-1.5"></div>
+                <div class="hit-line absolute w-3 h-[2px] bg-white -rotate-45 -translate-x-1.5 translate-y-1.5"></div>
+                <div class="hit-line absolute w-3 h-[2px] bg-white rotate-45 translate-x-1.5 translate-y-1.5"></div>
+            </div>
+        </div>
+
+        <!-- CS2 / CS:GO STYLE DEATH CARD (Positioned right below crosshair, no Loyalty Badge) -->
+        <div id="respawn-banner" class="hidden absolute top-[57%] left-1/2 -translate-x-1/2 w-[560px] max-w-[94vw] shadow-[0_20px_60px_rgba(0,0,0,0.95)] select-none z-30">
+            <div class="relative flex items-stretch bg-[#23171b]/95 border border-red-900/40 overflow-hidden rounded-sm">
+                
+                <!-- Left & Center Info Column -->
+                <div class="flex-1 flex flex-col justify-between">
+                    <!-- Middle Row: Avatar + Killer Name & Weapon Text -->
+                    <div class="p-3.5 flex items-center gap-3.5">
+                        <!-- Neon Pink/Magenta Agent Avatar Box -->
+                        <div class="w-16 h-16 shrink-0 rounded-sm overflow-hidden border border-pink-400/50 bg-gradient-to-br from-fuchsia-600 via-pink-600 to-purple-900 relative shadow-inner flex items-center justify-center">
+                            <svg class="w-14 h-14 mt-2" viewBox="0 0 64 64">
+                                <!-- Hood/Shoulders -->
+                                <path d="M8 64 C10 46 20 42 32 42 C44 42 54 46 56 64 Z" fill="#111827"/>
+                                <path d="M16 32 C16 14 48 14 48 32 L52 46 L12 46 Z" fill="#1f2937"/>
+                                <!-- Tactical Mask & Red Visor -->
+                                <ellipse cx="32" cy="30" rx="11" ry="13" fill="#0f172a"/>
+                                <path d="M23 27 L41 27 L39 32 L25 32 Z" fill="#ef4444"/>
+                                <path d="M26 35 L38 35 L36 42 L28 42 Z" fill="#334155"/>
+                            </svg>
+                        </div>
+
+                        <!-- Killer Name & Killed You With Text -->
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center justify-between gap-2">
+                                <div id="death-killer-name" class="text-xl font-extrabold text-white tracking-wide truncate leading-tight">
+                                    BOT_Алексей
+                                </div>
+                                <span class="text-[11px] font-mono-code text-red-300/90 shrink-0 bg-black/35 px-2 py-0.5 rounded border border-white/5">
+                                    Возрождение: <b id="respawn-timer" class="text-amber-400">3.0</b> с
+                                </span>
+                            </div>
+                            <div class="text-xs mt-1">
+                                <span class="text-red-400 italic font-medium">убил вас из </span>
+                                <span id="death-weapon-name" class="text-white font-extrabold italic tracking-wide">AK-47</span>
+                                <span id="death-headshot-tag" class="hidden ml-1.5 px-1.5 py-0.5 text-[10px] font-mono-code font-bold bg-red-600/30 border border-red-500/60 text-red-300 rounded">В ГОЛОВУ</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Damage Stats Bar with Signature Red Underline -->
+                    <div class="bg-[#180f12]/95 px-3.5 py-2 border-t border-white/5 border-b-[3px] border-b-red-600 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div class="text-slate-300">
+                            Получено урона: <b id="death-dmg-taken" class="text-white font-bold">112</b> за <b id="death-hits-taken" class="text-white font-bold">4</b> попад.
+                        </div>
+                        <div class="text-slate-300">
+                            Нанесено урона: <b id="death-dmg-given" class="text-amber-300 font-bold">72</b> за <b id="death-hits-given" class="text-amber-300 font-bold">2</b> попад.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Weapon Showcase Box -->
+                <div class="w-44 sm:w-48 bg-[#312126]/90 border-l border-white/10 flex flex-col items-center justify-center p-3 relative">
+                    <div id="death-weapon-svg-box" class="w-full h-20 flex items-center justify-center drop-shadow-[0_6px_10px_rgba(0,0,0,0.85)]">
+                        <!-- Populated dynamically with AK-47 / USP-S / M9 Bayonet illustration -->
+                    </div>
+                    <div id="death-weapon-sub" class="text-[10px] font-mono-code text-slate-300/80 uppercase tracking-widest mt-1">
+                        AK-47 | TACTICAL
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PAUSE OVERLAY (Freezes Bot & Game when ESC is pressed) -->
+        <div id="pause-overlay" class="hidden absolute inset-0 bg-slate-950/65 backdrop-blur-sm flex items-center justify-center pointer-events-auto">
+            <div class="cs2-panel p-6 rounded-2xl max-w-md w-full text-center border border-amber-500/30 shadow-2xl space-y-4">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300 text-xs font-mono-code font-bold">
+                    ⏸ ИГРА И БОТЫ НА ПАУЗЕ
+                </div>
+                <h3 class="font-tactical text-3xl font-extrabold text-white tracking-wider uppercase">ТАКТИЧЕСКАЯ ПАУЗА</h3>
+                <p class="text-xs text-slate-400">Симуляция ИИ и физика полностью остановлены, пока курсор разблокирован.</p>
+                <div class="flex flex-col gap-2.5 pt-2">
+                    <button onclick="Game.requestPointerLock()" class="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-tactical text-xl font-extrabold tracking-wider transition shadow-lg shadow-amber-500/20">
+                        🎯 ПРОДОЛЖИТЬ ИГРУ
+                    </button>
+                    <button onclick="UI.openSettings()" class="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold border border-white/10 transition">
+                        ⚙️ Открыть настройки
+                    </button>
+                    <button onclick="UI.returnToMainMenu()" class="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-red-950/60 text-slate-300 hover:text-red-300 text-xs font-semibold border border-white/10 transition">
+                        ← Выйти в главное лобби
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Left: Health & Armor (CS2 Style) -->
+        <div class="absolute bottom-5 left-6 flex items-end gap-4">
+            <!-- Health -->
+            <div class="cs2-hud-box px-5 py-2.5 rounded-lg flex items-center gap-3 min-w-[165px]">
+                <svg class="w-7 h-7 text-emerald-400 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M19 10h-5V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v5H5a1 1 0 00-1 1v2a1 1 0 001 1h5v5a1 1 0 001 1h2a1 1 0 001-1v-5h5a1 1 0 001-1v-2a1 1 0 00-1-1z"/>
+                </svg>
+                <div class="flex-1">
+                    <div class="flex items-baseline justify-between">
+                        <span id="hud-hp-text" class="font-tactical text-4xl font-extrabold text-white leading-none">100</span>
+                        <span class="text-[10px] font-bold uppercase text-slate-400 tracking-wider">HP</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1.5">
+                        <div id="hud-hp-bar" class="h-full bg-emerald-400 transition-all duration-150" style="width: 100%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Armor -->
+            <div class="cs2-hud-box px-5 py-2.5 rounded-lg flex items-center gap-3 min-w-[155px]">
+                <svg class="w-6 h-6 text-sky-400 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3z"/>
+                </svg>
+                <div class="flex-1">
+                    <div class="flex items-baseline justify-between">
+                        <span id="hud-armor-text" class="font-tactical text-4xl font-extrabold text-white leading-none">100</span>
+                        <span class="text-[10px] font-bold uppercase text-slate-400 tracking-wider">БРОНЯ</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1.5">
+                        <div id="hud-armor-bar" class="h-full bg-sky-400 transition-all duration-150" style="width: 100%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Right: Weapon Loadout (1: AK-47, 2: USP-S, 3: M9 Bayonet Knife) & Ammo Counter -->
+        <div class="absolute bottom-5 right-6 flex flex-col items-end gap-2.5">
+            <!-- Weapon Slots -->
+            <div class="flex flex-col items-end gap-1.5">
+                <!-- Slot 1: AK-47 -->
+                <div id="slot-ak47" class="px-4 py-1.5 rounded-lg border transition-all flex items-center gap-3 bg-amber-500/20 border-amber-400 text-white shadow-lg">
+                    <span class="font-mono-code text-xs text-amber-300 font-bold">[1]</span>
+                    <svg class="w-16 h-5 fill-current" viewBox="0 0 120 36">
+                        <path d="M5 18 L24 14 L32 14 L35 10 L75 10 L82 13 L108 13 L112 9 L115 9 L115 16 L84 16 L76 19 L65 19 L72 33 L63 34 L55 20 L42 20 L38 28 L32 28 L35 19 L24 20 L6 25 Z"/>
+                    </svg>
+                    <span class="font-tactical font-bold tracking-wider text-sm">AK-47</span>
+                </div>
+                <!-- Slot 2: USP-S -->
+                <div id="slot-usps" class="px-4 py-1.5 rounded-lg border transition-all flex items-center gap-3 bg-slate-900/70 border-white/10 text-slate-400">
+                    <span class="font-mono-code text-xs text-slate-400 font-bold">[2]</span>
+                    <svg class="w-14 h-5 fill-current" viewBox="0 0 100 36">
+                        <path d="M18 12 L58 12 L58 14 L94 14 L94 19 L58 19 L58 21 L36 21 L30 33 L20 33 L25 21 L18 21 Z"/>
+                    </svg>
+                    <span class="font-tactical font-bold tracking-wider text-sm">USP-S</span>
+                </div>
+                <!-- Slot 3: M9 Bayonet Knife -->
+                <div id="slot-knife" class="px-4 py-1.5 rounded-lg border transition-all flex items-center gap-3 bg-slate-900/70 border-white/10 text-slate-400">
+                    <span class="font-mono-code text-xs text-slate-400 font-bold">[3]</span>
+                    <svg class="w-14 h-5 fill-current" viewBox="0 0 100 36">
+                        <path d="M12 16 L40 16 L40 10 L45 10 L45 15 L88 13 L95 18 L82 22 L45 22 L45 27 L40 27 L40 21 L12 21 Z"/>
+                    </svg>
+                    <span class="font-tactical font-bold tracking-wider text-sm">НОЖ</span>
+                </div>
+            </div>
+
+            <!-- Active Ammo Counter -->
+            <div class="cs2-hud-box px-6 py-2.5 rounded-lg flex items-center gap-4 min-w-[230px] justify-between">
+                <div>
+                    <div id="hud-weapon-name" class="text-xs font-bold uppercase tracking-widest text-amber-400">AK-47 КАЛАШНИКОВ</div>
+                    <div id="hud-reload-state" class="text-[11px] text-slate-400 font-mono-code">АВТОМАТ • 7.62 ММ</div>
+                </div>
+                <div class="flex items-baseline gap-1.5 font-tactical">
+                    <span id="hud-ammo-clip" class="text-4xl font-extrabold text-white leading-none">30</span>
+                    <span id="hud-ammo-slash" class="text-xl text-slate-500 font-bold">/</span>
+                    <span id="hud-ammo-reserve" class="text-2xl font-bold text-slate-300 leading-none">90</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- MAIN MENU & ROOM CODE LOBBY (CS2 STYLE)    -->
+    <!-- ========================================== -->
+    <div id="main-menu" class="fixed inset-0 z-30 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
+        <div class="cs2-panel w-full max-w-5xl rounded-2xl overflow-hidden border border-white/15 shadow-2xl">
+            
+            <!-- Top Navigation Header (Download HTML button removed as requested) -->
+            <div class="bg-slate-900/90 border-b border-white/10 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20 font-tactical text-2xl font-extrabold text-slate-950">
+                        CS2
+                    </div>
+                    <div>
+                        <h1 class="font-tactical text-2xl font-extrabold tracking-wider text-white leading-none">COUNTER-STRIKE 2 <span class="text-amber-400">WEB ARENA</span></h1>
+                        <p class="text-xs text-slate-400">Тактический 3D-шутер • AK-47, USP-S и Нож M9 Bayonet • Онлайн по коду</p>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <button onclick="UI.openSettings()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/10 text-sm font-semibold text-white flex items-center gap-2 transition">
+                        <span>⚙️</span> Настройки
+                    </button>
+                    <button onclick="UI.toggleDebug()" class="px-4 py-2 rounded-lg bg-emerald-950/80 hover:bg-emerald-900/80 border border-emerald-500/40 text-sm font-mono-code text-emerald-300 flex items-center gap-2 transition">
+                        <span>🐞</span> Debug [`]
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Lobby Content Grid -->
+            <div class="p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                <!-- Left Column: Profile, Bot Difficulty & Weapons Preview (5 cols) -->
+                <div class="lg:col-span-5 flex flex-col justify-between gap-4 bg-slate-900/50 p-5 rounded-xl border border-white/5">
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Ваш игровой позывной (Никнейм)</label>
+                        <input id="input-player-name" type="text" maxlength="16" value="Спецназ_01" 
+                            class="w-full bg-slate-950 border border-white/15 focus:border-amber-400 rounded-lg px-3.5 py-2.5 text-white font-semibold outline-none transition"
+                            placeholder="Введите никнейм...">
+
+                        <!-- Loadout Showcase -->
+                        <div class="mt-4">
+                            <div class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Боевой арсенал в матче</div>
+                            <div class="space-y-2">
+                                <div class="p-2.5 rounded-lg bg-slate-950/80 border border-amber-500/30 flex items-center justify-between">
+                                    <div>
+                                        <div class="font-tactical text-base font-bold text-amber-400">AK-47 [Клавиша 1]</div>
+                                        <div class="text-[11px] text-slate-400">Урон: <b class="text-white">36</b> тело / <b class="text-red-400">112</b> голова</div>
+                                    </div>
+                                    <span class="font-mono-code text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">30 / 90</span>
+                                </div>
+                                <div class="p-2.5 rounded-lg bg-slate-950/80 border border-sky-500/30 flex items-center justify-between">
+                                    <div>
+                                        <div class="font-tactical text-base font-bold text-sky-400">USP-S с глушителем [Клавиша 2]</div>
+                                        <div class="text-[11px] text-slate-400">Урон: <b class="text-white">35</b> тело / <b class="text-red-400">100</b> голова</div>
+                                    </div>
+                                    <span class="font-mono-code text-xs bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded">12 / 24</span>
+                                </div>
+                                <div class="p-2.5 rounded-lg bg-slate-950/80 border border-emerald-500/30 flex items-center justify-between">
+                                    <div>
+                                        <div class="font-tactical text-base font-bold text-emerald-400">Нож M9 Bayonet [Клавиша 3]</div>
+                                        <div class="text-[11px] text-slate-400">ЛКМ: <b class="text-white">40</b> быстрый / ПКМ: <b class="text-red-400">65–100</b> сильный</div>
+                                    </div>
+                                    <span class="font-mono-code text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded">+СКОРОСТЬ</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Solo Practice Mode Card -->
+                    <div class="pt-3 border-t border-white/10 space-y-2.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-slate-300">Умный спарринг-бот (ИИ соперник)</span>
+                            <label class="inline-flex items-center cursor-pointer">
+                                <input id="toggle-bot-enabled" type="checkbox" checked class="sr-only peer" onchange="Game.setBotEnabled(this.checked)">
+                                <div class="w-9 h-5 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all relative peer-checked:bg-emerald-500"></div>
+                            </label>
+                        </div>
+                        <button onclick="Game.startMatch()" class="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-tactical text-xl font-extrabold tracking-wider shadow-lg shadow-emerald-600/25 transition flex items-center justify-center gap-2">
+                            <span>▶ ИГРАТЬ СЕЙЧАС (ТРЕНИРОВКА / БОТ)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Column: Dedicated WebSocket Server Multiplayer (7 cols) -->
+                <div class="lg:col-span-7 flex flex-col justify-between gap-3.5 bg-slate-900/50 p-5 rounded-xl border border-white/5">
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <h2 class="font-tactical text-xl font-bold text-white tracking-wide uppercase flex items-center gap-2">
+                                <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                                ВЫДЕЛЕННЫЙ СЕРВЕР (WEBSOCKET ОНЛАЙН)
+                            </h2>
+                            <span id="menu-net-badge" class="font-mono-code text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-white/10">
+                                Сервер: Готов
+                            </span>
+                        </div>
+
+                        <!-- Dedicated Server URL Bar & Quick Matchmaking -->
+                        <div class="bg-slate-950/90 border border-white/10 rounded-xl p-3 space-y-2.5">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="flex-1">
+                                    <label class="block text-[10px] font-mono-code uppercase tracking-wider text-slate-400 mb-1">
+                                        АДРЕС СЕРВЕРА (WSS:// ИЛИ HTTPS:// С RENDER / KOYEB)
+                                    </label>
+                                    <input id="input-server-url" type="text"
+                                        onchange="Network.saveServerUrl(this.value)"
+                                        placeholder="wss://ваш-сервер.onrender.com"
+                                        class="w-full bg-slate-900 border border-white/15 focus:border-amber-400 rounded-lg px-3 py-1.5 font-mono-code text-xs text-emerald-300 outline-none">
+                                </div>
+                                <button onclick="Network.quickMatch()" class="sm:mt-4 shrink-0 px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-tactical font-extrabold text-base tracking-wider shadow-lg shadow-amber-500/20 transition">
+                                    ⚡ БЫСТРЫЙ ПОИСК ИГРЫ
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Card 1: Create Room on Dedicated Server -->
+                            <div class="bg-slate-950/90 border border-amber-500/30 rounded-xl p-4 flex flex-col justify-between">
+                                <div>
+                                    <div class="text-xs font-bold uppercase text-amber-400 tracking-wider">ПРИВАТНАЯ КОМНАТА: СОЗДАТЬ</div>
+                                    <p class="text-xs text-slate-400 mt-1">Сервер создаст комнату с 4-значным кодом для игры с другом.</p>
+                                    
+                                    <div class="mt-3 bg-slate-900 border border-white/10 rounded-lg p-2.5 text-center">
+                                        <div class="text-[10px] uppercase tracking-widest text-slate-400">КОД КОМНАТЫ НА СЕРВЕРЕ</div>
+                                        <div id="host-room-code-display" class="font-mono-code text-3xl font-extrabold text-amber-400 tracking-widest my-0.5">----</div>
+                                        <button id="btn-copy-code" onclick="Network.copyRoomCode()" disabled class="text-xs text-sky-400 hover:text-sky-300 disabled:text-slate-600 font-medium transition">
+                                            📋 Скопировать код
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <button id="btn-create-room" onclick="Network.createRoom()" class="mt-3 w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-tactical font-extrabold text-lg tracking-wider transition shadow-lg shadow-amber-500/20">
+                                    СОЗДАТЬ НА СЕРВЕРЕ
+                                </button>
+                            </div>
+
+                            <!-- Card 2: Join Friend by Code on Dedicated Server -->
+                            <div class="bg-slate-950/90 border border-sky-500/30 rounded-xl p-4 flex flex-col justify-between">
+                                <div>
+                                    <div class="text-xs font-bold uppercase text-sky-400 tracking-wider">ВОЙТИ ПО КОДУ КОМНАТЫ</div>
+                                    <p class="text-xs text-slate-400 mt-1">Введите 4 цифры кода комнаты на выделенном сервере.</p>
+
+                                    <div class="mt-3">
+                                        <label class="block text-[10px] uppercase tracking-widest text-slate-400 mb-1">ВВЕДИТЕ 4-ЗНАЧНЫЙ КОД</label>
+                                        <input id="input-join-code" type="text" maxlength="6" placeholder="Например: 4829"
+                                            class="w-full bg-slate-900 border border-sky-500/40 focus:border-sky-400 rounded-lg px-3 py-2 text-center font-mono-code text-2xl font-bold text-white tracking-widest outline-none uppercase">
+                                    </div>
+                                </div>
+
+                                <button id="btn-join-room" onclick="Network.joinRoom()" class="mt-3 w-full py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-tactical font-extrabold text-lg tracking-wider transition shadow-lg shadow-sky-500/20">
+                                    ПРИСОЕДИНИТЬСЯ
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Live Lobby Status & Quick Enter Button -->
+                    <div class="bg-slate-950/80 border border-white/10 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <div class="flex items-center gap-3">
+                            <div id="lobby-status-dot" class="w-3 h-3 rounded-full bg-emerald-400 shrink-0"></div>
+                            <div id="lobby-status-text" class="text-xs text-slate-300 font-mono-code">
+                                Готово к бою! Выберите «Быстрый поиск», комнату по коду или тренировку с ботом.
+                            </div>
+                        </div>
+                        <button onclick="Game.startMatch()" class="shrink-0 px-5 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold uppercase tracking-wider transition">
+                            Войти на карту →
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- SETTINGS MODAL (ЧУВСТВИТЕЛЬНОСТЬ, FPS, ИИ) -->
+    <!-- ========================================== -->
+    <div id="settings-modal" class="fixed inset-0 z-40 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+        <div class="cs2-panel w-full max-w-2xl rounded-2xl overflow-hidden border border-white/15 shadow-2xl">
+            <div class="bg-slate-900 px-6 py-4 border-b border-white/10 flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <span class="text-amber-400 text-xl">⚙️</span>
+                    <h2 class="font-tactical text-2xl font-extrabold text-white tracking-wide uppercase">НАСТРОЙКИ ИГРЫ (CS2 CONFIG)</h2>
+                </div>
+                <button onclick="UI.closeSettings(true)" class="text-slate-400 hover:text-white px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 text-sm font-mono-code">
+                    ✕ ЗАКРЫТЬ
+                </button>
+            </div>
+
+            <div class="p-6 max-h-[78vh] overflow-y-auto space-y-5">
+                
+                <!-- Section 1: Mouse, Hand & AI Difficulty -->
+                <div class="bg-slate-900/60 p-4 rounded-xl border border-white/5 space-y-4">
+                    <div class="text-xs font-bold uppercase tracking-wider text-amber-400 border-b border-white/10 pb-1.5">
+                        1. Управление, Смена руки и Сложность Бота
+                    </div>
+
+                    <!-- Mouse Sensitivity -->
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="text-sm font-semibold text-white">Чувствительность мыши (Sensitivity)</label>
+                            <input id="set-sens-num" type="number" step="0.05" min="0.1" max="5.0" value="1.20"
+                                onchange="Settings.updateFromUI('sensitivity', this.value)"
+                                class="w-20 bg-slate-950 border border-white/15 rounded px-2 py-1 text-right font-mono-code text-sm text-amber-400 font-bold">
+                        </div>
+                        <input id="set-sens-range" type="range" min="0.1" max="5.0" step="0.05" value="1.20"
+                            oninput="Settings.updateFromUI('sensitivity', this.value)"
+                            class="w-full cursor-pointer">
+                        <div class="flex justify-between text-[11px] text-slate-500 font-mono-code">
+                            <span>0.10 (Низкая)</span>
+                            <span>1.20 (Стандарт CS2)</span>
+                            <span>5.00 (Высокая)</span>
+                        </div>
+                    </div>
+
+                    <!-- Hand Switch, Bot Difficulty & Invert Y -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                        <div class="bg-slate-950/60 p-3 rounded-lg border border-white/5">
+                            <div class="text-xs font-semibold text-white mb-1">Положение рук [H]</div>
+                            <select id="set-hand" onchange="Settings.updateFromUI('leftHand', this.value === 'left')"
+                                class="w-full bg-slate-900 border border-white/15 rounded px-2.5 py-1.5 text-xs font-semibold text-amber-300 outline-none">
+                                <option value="right">Правая рука (cl_righthand 1)</option>
+                                <option value="left">Левая рука (cl_righthand 0)</option>
+                            </select>
+                        </div>
+
+                        <div class="bg-slate-950/60 p-3 rounded-lg border border-white/5">
+                            <div class="text-xs font-semibold text-white mb-1">Сложность ИИ Бота</div>
+                            <select id="set-bot-diff" onchange="Settings.updateFromUI('botDifficulty', this.value)"
+                                class="w-full bg-slate-900 border border-white/15 rounded px-2.5 py-1.5 text-xs font-semibold text-emerald-300 outline-none">
+                                <option value="easy">Лёгкий (Разминка)</option>
+                                <option value="normal" selected>Средний (Тактический)</option>
+                                <option value="hard">Сложный (Ветеран)</option>
+                                <option value="pro">Киберспорт (Aim/Strafe)</option>
+                            </select>
+                        </div>
+
+                        <div class="flex items-center justify-between bg-slate-950/60 p-3 rounded-lg border border-white/5">
+                            <div>
+                                <div class="text-xs font-semibold text-white">Инверсия оси Y</div>
+                                <div class="text-[10px] text-slate-400">Вертикаль</div>
+                            </div>
+                            <input id="set-invert-y" type="checkbox" onchange="Settings.updateFromUI('invertY', this.checked)"
+                                class="w-5 h-5 accent-amber-500 rounded cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Crosshair Customization -->
+                <div class="bg-slate-900/60 p-4 rounded-xl border border-white/5 space-y-4">
+                    <div class="text-xs font-bold uppercase tracking-wider text-sky-400 border-b border-white/10 pb-1.5">
+                        2. Настройка прицела (Crosshair Generator)
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-xs text-slate-300 mb-1">Цвет прицела</label>
+                            <select id="set-ch-color" onchange="Settings.updateFromUI('chColor', this.value)"
+                                class="w-full bg-slate-950 border border-white/15 rounded px-3 py-2 text-xs font-semibold text-white outline-none">
+                                <option value="#34d399">Зеленый (Classic)</option>
+                                <option value="#38bdf8">Голубой (Cyan)</option>
+                                <option value="#facc15">Желтый (Yellow)</option>
+                                <option value="#f87171">Красный (Red)</option>
+                                <option value="#ffffff">Белый (White)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs text-slate-300 mb-1">
+                                <span>Длина линий</span>
+                                <span id="lbl-ch-size" class="font-mono-code text-amber-400">8 px</span>
+                            </div>
+                            <input id="set-ch-size" type="range" min="3" max="18" step="1" value="8"
+                                oninput="Settings.updateFromUI('chSize', this.value)" class="w-full">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs text-slate-300 mb-1">
+                                <span>Зазор (Gap)</span>
+                                <span id="lbl-ch-gap" class="font-mono-code text-amber-400">4 px</span>
+                            </div>
+                            <input id="set-ch-gap" type="range" min="0" max="14" step="1" value="4"
+                                oninput="Settings.updateFromUI('chGap', this.value)" class="w-full">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <label class="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-lg border border-white/5 cursor-pointer">
+                            <span class="text-xs font-medium text-slate-200">Точка в центре прицела</span>
+                            <input id="set-ch-dot" type="checkbox" onchange="Settings.updateFromUI('chDot', this.checked)" class="w-4 h-4 accent-amber-500">
+                        </label>
+                        <label class="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-lg border border-white/5 cursor-pointer">
+                            <span class="text-xs font-medium text-slate-200">Динамический разброс прицела</span>
+                            <input id="set-ch-dyn" type="checkbox" checked onchange="Settings.updateFromUI('chDynamic', this.checked)" class="w-4 h-4 accent-amber-500">
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Section 3: FPS Limit (30 - 360 FPS Max) & Audio -->
+                <div class="bg-slate-900/60 p-4 rounded-xl border border-white/5 space-y-4">
+                    <div class="text-xs font-bold uppercase tracking-wider text-emerald-400 border-b border-white/10 pb-1.5">
+                        3. Лимит частоты кадров (До 360 FPS) и Звук
+                    </div>
+
+                    <!-- FPS Limiter (fps_max: 30 - 360 FPS) -->
+                    <div class="bg-slate-950/75 p-3.5 rounded-xl border border-emerald-500/30 space-y-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <label class="text-sm font-semibold text-white flex items-center gap-2">
+                                    <span>Лимит частоты кадров (<code class="text-amber-400 font-mono-code">fps_max</code>)</span>
+                                </label>
+                                <p class="text-[11px] text-slate-400">Регулировка ограничения FPS от 30 до 360 кадров/сек (максимум 360 FPS)</p>
+                            </div>
+                            <span id="lbl-fps-max" class="font-mono-code text-sm font-extrabold px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                360 FPS
+                            </span>
+                        </div>
+
+                        <input id="set-fps-max" type="range" min="30" max="360" step="5" value="360"
+                            oninput="Settings.updateFromUI('fpsMax', this.value)" class="w-full cursor-pointer">
+
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <span class="text-[10px] font-mono-code uppercase text-slate-400 mr-1">Быстрый выбор:</span>
+                            <button type="button" onclick="Settings.updateFromUI('fpsMax', 60)" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-mono-code text-slate-200 border border-white/10 transition">60 FPS</button>
+                            <button type="button" onclick="Settings.updateFromUI('fpsMax', 120)" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-mono-code text-slate-200 border border-white/10 transition">120 FPS</button>
+                            <button type="button" onclick="Settings.updateFromUI('fpsMax', 144)" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-mono-code text-slate-200 border border-white/10 transition">144 FPS</button>
+                            <button type="button" onclick="Settings.updateFromUI('fpsMax', 240)" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-mono-code text-slate-200 border border-white/10 transition">240 FPS</button>
+                            <button type="button" onclick="Settings.updateFromUI('fpsMax', 360)" class="px-3 py-1 rounded bg-emerald-600/30 hover:bg-emerald-500/40 text-xs font-mono-code font-bold text-emerald-300 border border-emerald-400/50 transition">
+                                360 FPS (MAX)
+                            </button>
+                        </div>
+
+                        <div class="pt-2 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                                <div class="text-xs font-semibold text-white">Режим синхронизации кадров</div>
+                                <div class="text-[10px] text-slate-400">Высокочастотный таймер (до 360 FPS) или VSync монитора</div>
+                            </div>
+                            <select id="set-vsync-mode" onchange="Settings.updateFromUI('vsync', this.value === 'vsync')"
+                                class="bg-slate-900 border border-white/15 rounded px-2.5 py-1.5 text-xs font-semibold text-amber-300 outline-none shrink-0">
+                                <option value="uncapped">⚡ До 360 FPS (Без VSync)</option>
+                                <option value="vsync">🖥️ По герцовке монитора (VSync)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Master Volume -->
+                    <div>
+                        <div class="flex justify-between text-xs font-semibold text-white mb-1">
+                            <span>Громкость звука (Master Volume)</span>
+                            <span id="lbl-volume" class="font-mono-code text-amber-400">75%</span>
+                        </div>
+                        <input id="set-volume" type="range" min="0" max="100" step="5" value="75"
+                            oninput="Settings.updateFromUI('volume', this.value)" class="w-full">
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <label class="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-lg border border-white/5 cursor-pointer">
+                            <span class="text-xs font-medium text-slate-200">Автоматическая перезарядка</span>
+                            <input id="set-autoreload" type="checkbox" checked onchange="Settings.updateFromUI('autoReload', this.checked)" class="w-4 h-4 accent-amber-500">
+                        </label>
+                        <label class="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-lg border border-white/5 cursor-pointer">
+                            <span class="text-xs font-medium text-slate-200">Физические гильзы, искры и трассеры</span>
+                            <input id="set-tracers" type="checkbox" checked onchange="Settings.updateFromUI('tracers', this.checked)" class="w-4 h-4 accent-amber-500">
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="bg-slate-900 px-6 py-3.5 border-t border-white/10 flex items-center justify-between">
+                <button onclick="Settings.resetDefaults()" class="text-xs text-slate-400 hover:text-red-400 font-medium transition">
+                    ↺ Сбросить по умолчанию
+                </button>
+                <div class="flex items-center gap-3">
+                    <button onclick="UI.returnToMainMenu()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
+                        В главное лобби
+                    </button>
+                    <button onclick="UI.closeSettings(true)" class="px-6 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-tactical font-extrabold text-base tracking-wider transition">
+                        СОХРАНИТЬ И ВЕРНУТЬСЯ В БОЙ
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- MANDATORY DEBUG MENU & ERROR CONSOLE       -->
+    <!-- (Does NOT unlock mouse or pause the game!) -->
+    <!-- ========================================== -->
+    <div id="debug-panel" class="fixed top-14 left-3 z-50 w-[95vw] max-w-xl cs2-panel rounded-xl border border-emerald-500/40 shadow-2xl hidden flex-col overflow-hidden opacity-90">
+        <div class="bg-slate-950 px-4 py-2.5 border-b border-white/10 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                <span class="font-mono-code text-xs font-bold text-emerald-400 tracking-wider uppercase">CS2 ENGINE DEBUGGER [` / F3] (БЕЗ ПАУЗЫ)</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+                <button onclick="DebugLogger.copyLogs()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-mono-code text-sky-300 border border-white/10">
+                    Копировать
+                </button>
+                <button onclick="DebugLogger.clear()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-mono-code text-slate-300 border border-white/10">
+                    Очистить
+                </button>
+                <button onclick="UI.toggleDebug()" class="px-2 py-1 rounded bg-red-950/60 hover:bg-red-900 text-[11px] font-mono-code text-red-300 border border-red-500/30">
+                    ✕
+                </button>
+            </div>
+        </div>
+
+        <!-- Live Telemetry Grid -->
+        <div class="p-3 bg-slate-900/90 border-b border-white/10 grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono-code text-[11px]">
+            <div class="bg-slate-950/80 p-2 rounded border border-white/5">
+                <div class="text-slate-500 text-[10px]">FPS / FRAME</div>
+                <div id="dbg-fps" class="text-emerald-400 font-bold">60 FPS (16.6ms)</div>
+            </div>
+            <div class="bg-slate-950/80 p-2 rounded border border-white/5">
+                <div class="text-slate-500 text-[10px]">CAM YAW / PITCH / Z</div>
+                <div id="dbg-pos" class="text-white font-bold">0°, 0°, Z:0.00</div>
+            </div>
+            <div class="bg-slate-950/80 p-2 rounded border border-white/5">
+                <div class="text-slate-500 text-[10px]">BOT AI / LOS</div>
+                <div id="dbg-net" class="text-amber-400 font-bold truncate">PATROL (LOS: NO)</div>
+            </div>
+            <div class="bg-slate-950/80 p-2 rounded border border-white/5">
+                <div class="text-slate-500 text-[10px]">PACKETS TX/RX • ERR</div>
+                <div id="dbg-packets" class="text-sky-400 font-bold">0/s • 0/s • E:0</div>
+            </div>
+        </div>
+
+        <!-- Quick Diagnostic & Cheat Tools -->
+        <div class="px-3 py-2 bg-slate-950/60 border-b border-white/10 flex flex-wrap items-center gap-1.5">
+            <button onclick="DebugLogger.triggerTestError()" class="px-2.5 py-1 rounded bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-[11px] font-mono-code text-red-300 transition">
+                ⚠ Тест Ошибки
+            </button>
+            <button onclick="Network.sendPingTest()" class="px-2.5 py-1 rounded bg-sky-950/80 hover:bg-sky-900 border border-sky-500/40 text-[11px] font-mono-code text-sky-300 transition">
+                📡 Пинг-тест
+            </button>
+            <button onclick="Game.toggleWireframeHitboxes()" class="px-2.5 py-1 rounded bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-[11px] font-mono-code text-emerald-300 transition">
+                🟩 Хитбоксы (Wireframe)
+            </button>
+            <button onclick="Game.refillPlayer()" class="px-2.5 py-1 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-500/40 text-[11px] font-mono-code text-amber-300 transition">
+                💊 +100 HP & Патроны
+            </button>
+        </div>
+
+        <!-- Log Filter Tabs -->
+        <div class="px-3 py-1.5 bg-slate-900 flex items-center gap-1.5 border-b border-white/10 text-[11px] font-mono-code">
+            <span class="text-slate-500 mr-1">Фильтр:</span>
+            <button onclick="DebugLogger.setFilter('ALL')" id="flt-ALL" class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Все</button>
+            <button onclick="DebugLogger.setFilter('ERR')" id="flt-ERR" class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 hover:text-white">Ошибки (<span id="dbg-err-count">0</span>)</button>
+            <button onclick="DebugLogger.setFilter('NET')" id="flt-NET" class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 hover:text-white">Сеть</button>
+            <button onclick="DebugLogger.setFilter('WEAPON')" id="flt-WEAPON" class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 hover:text-white">Оружие/ИИ</button>
+            <button onclick="DebugLogger.setFilter('SYS')" id="flt-SYS" class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 hover:text-white">Система</button>
+        </div>
+
+        <!-- Log Output Stream -->
+        <div id="debug-log-stream" class="p-3 h-52 overflow-y-auto font-mono-code text-[11px] space-y-1 bg-slate-950/95 select-text"></div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- JAVASCRIPT ENGINE (MODULAR SINGLE-FILE)    -->
+    <!-- ========================================== -->
+    <script>
+        /******************************************************************
+         * 1. DEBUG LOGGER & ERROR INTERCEPTOR
+         ******************************************************************/
+        const DebugLogger = {
+            logs: [],
+            maxLogs: 250,
+            filter: 'ALL',
+            errorCount: 0,
+
+            init() {
+                window.addEventListener('error', (event) => {
+                    this.log('ERR', `Runtime Error: ${event.message} (${event.filename || 'inline'}:${event.lineno || 0})`, 'error');
+                });
+                window.addEventListener('unhandledrejection', (event) => {
+                    const reason = event.reason ? (event.reason.message || String(event.reason)) : 'Unknown Promise Rejection';
+                    this.log('ERR', `Unhandled Promise: ${reason}`, 'error');
+                });
+                this.log('SYS', 'Движок CS2 Web Strike запущен. Debug-меню работает без сброса прицела.', 'info');
+            },
+
+            log(category, message, level = 'info') {
+                const now = new Date();
+                const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+                if (level === 'error' || category === 'ERR') {
+                    this.errorCount++;
+                    const errBadge = document.getElementById('dbg-err-count');
+                    if (errBadge) errBadge.textContent = this.errorCount;
+                }
+
+                const entry = { id: Date.now() + Math.random(), time: timeStr, category, message, level };
+                this.logs.push(entry);
+                if (this.logs.length > this.maxLogs) this.logs.shift();
+                this.appendEntryDOM(entry);
+            },
+
+            appendEntryDOM(entry) {
+                const stream = document.getElementById('debug-log-stream');
+                if (!stream) return;
+                if (this.filter !== 'ALL' && this.filter !== entry.category && !(this.filter === 'ERR' && entry.level === 'error')) {
+                    return;
+                }
+
+                const div = document.createElement('div');
+                div.className = 'leading-relaxed break-words border-b border-white/5 pb-0.5';
+
+                let badgeColor = 'text-slate-400';
+                if (entry.category === 'NET') badgeColor = 'text-sky-400';
+                if (entry.category === 'WEAPON') badgeColor = 'text-amber-400';
+                if (entry.category === 'SYS') badgeColor = 'text-emerald-400';
+                if (entry.level === 'error' || entry.category === 'ERR') badgeColor = 'text-red-400 font-bold';
+                if (entry.level === 'warn') badgeColor = 'text-yellow-400';
+
+                div.innerHTML = `<span class="text-slate-500">[${entry.time}]</span> <span class="${badgeColor}">[${entry.category}]</span> <span class="${entry.level === 'error' ? 'text-red-300' : 'text-slate-200'}">${this.escapeHTML(entry.message)}</span>`;
+                stream.appendChild(div);
+                stream.scrollTop = stream.scrollHeight;
+            },
+
+            renderAll() {
+                const stream = document.getElementById('debug-log-stream');
+                if (!stream) return;
+                stream.innerHTML = '';
+                this.logs.forEach(entry => this.appendEntryDOM(entry));
+            },
+
+            setFilter(flt) {
+                this.filter = flt;
+                ['ALL', 'ERR', 'NET', 'WEAPON', 'SYS'].forEach(k => {
+                    const btn = document.getElementById('flt-' + k);
+                    if (!btn) return;
+                    btn.className = (k === flt)
+                        ? 'px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : 'px-2 py-0.5 rounded bg-slate-800 text-slate-400 hover:text-white';
+                });
+                this.renderAll();
+            },
+
+            clear() {
+                this.logs = [];
+                this.errorCount = 0;
+                const errBadge = document.getElementById('dbg-err-count');
+                if (errBadge) errBadge.textContent = '0';
+                this.renderAll();
+                this.log('SYS', 'Журнал отладки очищен.', 'info');
+            },
+
+            copyLogs() {
+                const text = this.logs.map(l => `[${l.time}] [${l.category}] ${l.message}`).join('\n');
+                const ta = document.createElement('textarea');
+                ta.value = text || 'Логи пусты';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                this.log('SYS', 'Логи скопированы в буфер обмена!', 'info');
+            },
+
+            triggerTestError() {
+                try {
+                    throw new Error('Тестовое исключение: проверка детектора ошибок CS2 Debugger');
+                } catch (err) {
+                    this.log('ERR', err.message, 'error');
+                }
+            },
+
+            escapeHTML(str) {
+                return String(str).replace(/[&<>"']/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[s]));
+            }
+        };
+
+        /******************************************************************
+         * 2. SETTINGS MANAGER (Чувствительность, Смена рук, Лимит FPS, ИИ)
+         ******************************************************************/
+        const Settings = {
+            data: {
+                sensitivity: 1.20,
+                invertY: false,
+                leftHand: false,
+                botDifficulty: 'normal',
+                fpsMax: 360, // Maximum limit is 360 FPS (range: 30..360)
+                vsync: false,
+                volume: 75,
+                chColor: '#34d399',
+                chSize: 8,
+                chGap: 4,
+                chDot: false,
+                chDynamic: true,
+                autoReload: true,
+                tracers: true
+            },
+
+            init() {
+                try {
+                    const saved = localStorage.getItem('cs2_web_settings_v4');
+                    if (saved) Object.assign(this.data, JSON.parse(saved));
+                } catch (e) {
+                    DebugLogger.log('ERR', 'Ошибка чтения настроек: ' + e.message, 'warn');
+                }
+                if (!this.data.fpsMax || this.data.fpsMax <= 0 || this.data.fpsMax > 360) {
+                    this.data.fpsMax = 360;
+                } else if (this.data.fpsMax < 30) {
+                    this.data.fpsMax = 30;
+                }
+                this.syncUIToData();
+                this.applyAll();
+            },
+
+            syncUIToData() {
+                document.getElementById('set-sens-num').value = Number(this.data.sensitivity).toFixed(2);
+                document.getElementById('set-sens-range').value = this.data.sensitivity;
+                document.getElementById('set-hand').value = this.data.leftHand ? 'left' : 'right';
+                document.getElementById('set-bot-diff').value = this.data.botDifficulty || 'normal';
+                document.getElementById('set-invert-y').checked = this.data.invertY;
+                document.getElementById('set-ch-color').value = this.data.chColor;
+                document.getElementById('set-ch-size').value = this.data.chSize;
+                document.getElementById('lbl-ch-size').textContent = this.data.chSize + ' px';
+                document.getElementById('set-ch-gap').value = this.data.chGap;
+                document.getElementById('lbl-ch-gap').textContent = this.data.chGap + ' px';
+                document.getElementById('set-ch-dot').checked = this.data.chDot;
+                document.getElementById('set-ch-dyn').checked = this.data.chDynamic;
+                document.getElementById('set-volume').value = this.data.volume;
+                document.getElementById('lbl-volume').textContent = this.data.volume + '%';
+                document.getElementById('set-autoreload').checked = this.data.autoReload;
+                document.getElementById('set-tracers').checked = this.data.tracers;
+
+                const fpsVal = Math.max(30, Math.min(360, parseInt(this.data.fpsMax, 10) || 360));
+                this.data.fpsMax = fpsVal;
+                const fpsSlider = document.getElementById('set-fps-max');
+                if (fpsSlider) fpsSlider.value = fpsVal;
+
+                const lblFps = document.getElementById('lbl-fps-max');
+                if (lblFps) {
+                    lblFps.textContent = `${fpsVal} FPS`;
+                }
+
+                const vsyncSel = document.getElementById('set-vsync-mode');
+                if (vsyncSel) {
+                    vsyncSel.value = this.data.vsync ? 'vsync' : 'uncapped';
+                }
+
+                const hudCap = document.getElementById('hud-fps-cap');
+                if (hudCap) {
+                    hudCap.textContent = this.data.vsync ? '(VSYNC)' : `(${fpsVal})`;
+                }
+            },
+
+            updateFromUI(key, val) {
+                if (key === 'sensitivity') {
+                    val = Math.max(0.1, Math.min(5.0, parseFloat(val) || 1.2));
+                } else if (key === 'fpsMax') {
+                    val = Math.max(30, Math.min(360, parseInt(val, 10) || 360));
+                } else if (['chSize', 'chGap', 'volume'].includes(key)) {
+                    val = parseInt(val, 10) || 0;
+                }
+                this.data[key] = val;
+                this.syncUIToData();
+                this.applyAll();
+                try {
+                    localStorage.setItem('cs2_web_settings_v4', JSON.stringify(this.data));
+                } catch (e) {}
+                DebugLogger.log('SYS', `Настройка обновлена: ${key} = ${val}`);
+            },
+
+            toggleHand() {
+                this.updateFromUI('leftHand', !this.data.leftHand);
+                DebugLogger.log('WEAPON', `Положение оружия: ${this.data.leftHand ? 'ЛЕВАЯ РУКА (cl_righthand 0)' : 'ПРАВАЯ РУКА (cl_righthand 1)'}`);
+            },
+
+            applyAll() {
+                this.updateCrosshairDOM(0);
+            },
+
+            updateCrosshairDOM(extraSpread = 0) {
+                const size = this.data.chSize;
+                const gap = this.data.chGap + (this.data.chDynamic ? Math.round(extraSpread) : 0);
+                const color = this.data.chColor;
+
+                const top = document.getElementById('ch-top');
+                const bottom = document.getElementById('ch-bottom');
+                const left = document.getElementById('ch-left');
+                const right = document.getElementById('ch-right');
+                const dot = document.getElementById('ch-dot');
+                if (!top) return;
+
+                [top, bottom, left, right, dot].forEach(el => {
+                    el.style.backgroundColor = color;
+                });
+
+                top.style.width = '2px';
+                top.style.height = size + 'px';
+                top.style.transform = `translateY(-${gap + size / 2}px)`;
+
+                bottom.style.width = '2px';
+                bottom.style.height = size + 'px';
+                bottom.style.transform = `translateY(${gap + size / 2}px)`;
+
+                left.style.height = '2px';
+                left.style.width = size + 'px';
+                left.style.transform = `translateX(-${gap + size / 2}px)`;
+
+                right.style.height = '2px';
+                right.style.width = size + 'px';
+                right.style.transform = `translateX(${gap + size / 2}px)`;
+
+                dot.style.width = '2px';
+                dot.style.height = '2px';
+                dot.classList.toggle('hidden', !this.data.chDot);
+            },
+
+            resetDefaults() {
+                this.data = {
+                    sensitivity: 1.20,
+                    invertY: false,
+                    leftHand: false,
+                    botDifficulty: 'normal',
+                    fpsMax: 360,
+                    vsync: false,
+                    volume: 75,
+                    chColor: '#34d399',
+                    chSize: 8,
+                    chGap: 4,
+                    chDot: false,
+                    chDynamic: true,
+                    autoReload: true,
+                    tracers: true
+                };
+                this.syncUIToData();
+                this.applyAll();
+                DebugLogger.log('SYS', 'Настройки сброшены по умолчанию.');
+            }
+        };
+
+        /******************************************************************
+         * 3. PROCEDURAL WEB AUDIO SYNTHESIZER (incl. Knife & 3-Stage Reload)
+         ******************************************************************/
+        const SoundFX = {
+            ctx: null,
+
+            ensureContext() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) this.ctx = new AudioCtx();
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            },
+
+            getGain() {
+                return (Settings.data.volume / 100) * 0.65;
+            },
+
+            playGunshot(weaponKey, distance = 0) {
+                this.ensureContext();
+                if (!this.ctx || Settings.data.volume <= 0) return;
+
+                if (weaponKey === 'knife') {
+                    this.playKnifeSlash(false);
+                    return;
+                }
+
+                const distFactor = Math.max(0.08, 1 - distance / 68);
+                const masterVol = this.getGain() * distFactor;
+                const now = this.ctx.currentTime;
+
+                if (weaponKey === 'ak47') {
+                    const osc = this.ctx.createOscillator();
+                    const oscGain = this.ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.exponentialRampToValueAtTime(34, now + 0.11);
+                    oscGain.gain.setValueAtTime(masterVol * 0.9, now);
+                    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+                    osc.connect(oscGain);
+                    oscGain.connect(this.ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.12);
+
+                    const bufferSize = Math.floor(this.ctx.sampleRate * 0.2);
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) {
+                        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.05));
+                    }
+                    const noise = this.ctx.createBufferSource();
+                    noise.buffer = buffer;
+
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'bandpass';
+                    filter.frequency.setValueAtTime(1150, now);
+                    filter.Q.setValueAtTime(0.7, now);
+
+                    const nGain = this.ctx.createGain();
+                    nGain.gain.setValueAtTime(masterVol * 1.05, now);
+                    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+                    noise.connect(filter);
+                    filter.connect(nGain);
+                    nGain.connect(this.ctx.destination);
+                    noise.start(now);
+                } else {
+                    // USP-S Suppressed shot
+                    const osc = this.ctx.createOscillator();
+                    const oscGain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(330, now);
+                    osc.frequency.exponentialRampToValueAtTime(75, now + 0.065);
+                    oscGain.gain.setValueAtTime(masterVol * 0.55, now);
+                    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+                    osc.connect(oscGain);
+                    oscGain.connect(this.ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.07);
+
+                    const bufferSize = Math.floor(this.ctx.sampleRate * 0.075);
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) {
+                        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.018));
+                    }
+                    const noise = this.ctx.createBufferSource();
+                    noise.buffer = buffer;
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'highpass';
+                    filter.frequency.setValueAtTime(1800, now);
+
+                    const nGain = this.ctx.createGain();
+                    nGain.gain.setValueAtTime(masterVol * 0.48, now);
+                    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.075);
+
+                    noise.connect(filter);
+                    filter.connect(nGain);
+                    nGain.connect(this.ctx.destination);
+                    noise.start(now);
+                }
+            },
+
+            // Knife Swoosh / Heavy Stab Sound
+            playKnifeSlash(isHeavy = false) {
+                this.ensureContext();
+                if (!this.ctx || Settings.data.volume <= 0) return;
+                const now = this.ctx.currentTime;
+                const dur = isHeavy ? 0.14 : 0.085;
+                const bufferSize = Math.floor(this.ctx.sampleRate * dur);
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = (Math.random() * 2 - 1) * Math.sin((i / bufferSize) * Math.PI);
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.setValueAtTime(isHeavy ? 900 : 1450, now);
+                filter.frequency.exponentialRampToValueAtTime(380, now + dur);
+
+                const g = this.ctx.createGain();
+                g.gain.setValueAtTime(this.getGain() * (isHeavy ? 0.65 : 0.45), now);
+                g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+                noise.connect(filter);
+                filter.connect(g);
+                g.connect(this.ctx.destination);
+                noise.start(now);
+            },
+
+            // Stage 1 Reload Sound
+            playMagOut() {
+                this.ensureContext();
+                if (!this.ctx || Settings.data.volume <= 0) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const g = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(620, now);
+                osc.frequency.exponentialRampToValueAtTime(240, now + 0.09);
+                g.gain.setValueAtTime(this.getGain() * 0.35, now);
+                g.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+                osc.connect(g);
+                g.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            },
+
+            // Stage 2 Reload Sound
+            playMagIn() {
+                this.ensureContext();
+                if (!this.ctx || Settings.data.volume <= 0) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const g = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(190, now);
+                osc.frequency.setValueAtTime(840, now + 0.045);
+                g.gain.setValueAtTime(this.getGain() * 0.45, now);
+                g.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+                osc.connect(g);
+                g.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.11);
+            },
+
+            // Stage 3 Reload Sound
+            playBoltRack() {
+                this.ensureContext();
+                if (!this.ctx || Settings.data.volume <= 0) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const g = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(480, now);
+                osc.frequency.setValueAtTime(1120, now + 0.06);
+                g.gain.setValueAtTime(this.getGain() * 0.4, now);
+                g.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+                osc.connect(g);
+                g.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.13);
+            },
+
+            playHitmarker(isHeadshot = false) {
+                this.ensureContext();
+                if (!this.ctx || Settings.data.volume <= 0) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const g = this.ctx.createGain();
+
+                if (isHeadshot) {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(2200, now);
+                    osc.frequency.exponentialRampToValueAtTime(1350, now + 0.12);
+                    g.gain.setValueAtTime(this.getGain() * 0.85, now);
+                    g.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+                } else {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(920, now);
+                    osc.frequency.exponentialRampToValueAtTime(310, now + 0.05);
+                    g.gain.setValueAtTime(this.getGain() * 0.6, now);
+                    g.gain.exponentialRampToValueAtTime(0.001, now + 0.055);
+                }
+                osc.connect(g);
+                g.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + (isHeadshot ? 0.13 : 0.055));
+            },
+
+            playFootstep() {
+                this.ensureContext();
+                if (!this.ctx || Settings.data.volume <= 0) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const g = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(105 + Math.random() * 25, now);
+                osc.frequency.exponentialRampToValueAtTime(38, now + 0.055);
+                g.gain.setValueAtTime(this.getGain() * 0.2, now);
+                g.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+                osc.connect(g);
+                g.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.06);
+            }
+        };
+
+        /******************************************************************
+         * 4. DEDICATED WEBSOCKET SERVER NETWORK MANAGER (NO P2P / NO NAT)
+         ******************************************************************/
+        // Укажите здесь ссылку на ваш бесплатный сервер Render.com или Koyeb (например: 'wss://cs2-server.onrender.com'),
+        // чтобы игроки с GitHub Pages подключались автоматически без ввода адреса!
+        const DEFAULT_SERVER_URL = '';
+
+        const Network = {
+            ws: null,
+            serverUrl: '',
+            roomCode: null,
+            isHost: false,
+            connected: false, // True when opponent is in the same room on the server
+            wsOpen: false,
+            pingMs: 0,
+            lastPingSent: 0,
+            txCount: 0,
+            rxCount: 0,
+            txPerSec: 0,
+            rxPerSec: 0,
+
+            initMetricsLoop() {
+                this.initServerUrl();
+
+                setInterval(() => {
+                    this.txPerSec = this.txCount;
+                    this.rxPerSec = this.rxCount;
+                    this.txCount = 0;
+                    this.rxCount = 0;
+
+                    if (this.wsOpen && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.lastPingSent = performance.now();
+                        this.sendRaw({ type: 'ping', t: this.lastPingSent });
+                    }
+                }, 1000);
+            },
+
+            initServerUrl() {
+                let saved = '';
+                try {
+                    saved = localStorage.getItem('cs2_dedicated_server_url') || '';
+                } catch (e) {}
+
+                if (saved) {
+                    this.serverUrl = saved;
+                } else if (DEFAULT_SERVER_URL) {
+                    this.serverUrl = DEFAULT_SERVER_URL;
+                } else if (location.protocol.startsWith('http') && !location.hostname.endsWith('github.io')) {
+                    // If the game is opened directly from the Node.js server (Render / Koyeb / localhost), auto-detect!
+                    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    this.serverUrl = `${proto}//${location.host}`;
+                } else {
+                    this.serverUrl = 'ws://localhost:8080';
+                }
+
+                const inp = document.getElementById('input-server-url');
+                if (inp) inp.value = this.serverUrl;
+            },
+
+            saveServerUrl(val) {
+                let clean = (val || '').trim();
+                if (clean.startsWith('https://')) clean = 'wss://' + clean.slice(8);
+                else if (clean.startsWith('http://')) clean = 'ws://' + clean.slice(7);
+                else if (clean && !clean.startsWith('ws://') && !clean.startsWith('wss://')) {
+                    clean = 'wss://' + clean;
+                }
+                this.serverUrl = clean;
+                const inp = document.getElementById('input-server-url');
+                if (inp) inp.value = clean;
+                try {
+                    localStorage.setItem('cs2_dedicated_server_url', clean);
+                } catch (e) {}
+                DebugLogger.log('NET', `Адрес выделенного сервера сохранен: ${clean}`);
+            },
+
+            cleanup() {
+                if (this.ws) {
+                    try {
+                        this.ws.onclose = null;
+                        this.ws.close();
+                    } catch (e) {}
+                    this.ws = null;
+                }
+                this.connected = false;
+                this.wsOpen = false;
+            },
+
+            connectToServer(onOpenCallback) {
+                const inp = document.getElementById('input-server-url');
+                if (inp && inp.value.trim()) {
+                    this.saveServerUrl(inp.value.trim());
+                }
+
+                if (!this.serverUrl) {
+                    this.setLobbyStatus('red', 'Укажите адрес выделенного WebSocket-сервера (wss://...)!');
+                    DebugLogger.log('ERR', 'Не указан адрес сервера! Введите URL вашего сервера Render/Koyeb.', 'warn');
+                    return;
+                }
+
+                this.cleanup();
+                this.setLobbyStatus('amber', `Подключение к выделенному серверу ${this.serverUrl}...`);
+                DebugLogger.log('NET', `Установка WebSocket-соединения с ${this.serverUrl}...`);
+
+                try {
+                    this.ws = new WebSocket(this.serverUrl);
+                } catch (err) {
+                    DebugLogger.log('ERR', 'Ошибка WebSocket URL: ' + err.message, 'error');
+                    this.setLobbyStatus('red', 'Некорректный адрес сервера!');
+                    return;
+                }
+
+                this.ws.onopen = () => {
+                    this.wsOpen = true;
+                    DebugLogger.log('NET', `Подключено к выделенному серверу (${this.serverUrl})!`);
+                    if (onOpenCallback) onOpenCallback();
+                };
+
+                this.ws.onmessage = (event) => {
+                    this.rxCount++;
+                    try {
+                        const pkt = JSON.parse(event.data);
+                        this.handlePacket(pkt);
+                    } catch (err) {
+                        DebugLogger.log('ERR', 'Ошибка разбора пакета сервера: ' + err.message, 'error');
+                    }
+                };
+
+                this.ws.onclose = () => {
+                    this.wsOpen = false;
+                    this.connected = false;
+                    DebugLogger.log('NET', 'Соединение с выделенным сервером закрыто. Включен режим с ботом.', 'warn');
+                    this.setLobbyStatus('amber', 'Отключено от сервера. Режим с ботом активен.');
+                    Game.setBotEnabled(true);
+                };
+
+                this.ws.onerror = () => {
+                    DebugLogger.log('ERR', `Не удалось подключиться к серверу ${this.serverUrl}. Проверьте, запущен ли server.js.`, 'error');
+                    this.setLobbyStatus('red', 'Сервер недоступен (если это бесплатный Render, подождите 30 сек для пробуждения)');
+                };
+            },
+
+            createRoom() {
+                const myName = document.getElementById('input-player-name').value.trim() || 'Спецназ_01';
+                this.connectToServer(() => {
+                    this.sendRaw({ type: 'create_room', name: myName });
+                });
+            },
+
+            joinRoom() {
+                const rawInput = document.getElementById('input-join-code').value.trim();
+                const code = rawInput.replace(/\D/g, '');
+                if (code.length < 4) {
+                    DebugLogger.log('ERR', 'Введите корректный 4-значный код комнаты!', 'warn');
+                    this.setLobbyStatus('red', 'Ошибка: код должен состоять из 4 цифр!');
+                    return;
+                }
+                const myName = document.getElementById('input-player-name').value.trim() || 'Спецназ_01';
+                this.connectToServer(() => {
+                    this.sendRaw({ type: 'join_room', code, name: myName });
+                });
+            },
+
+            quickMatch() {
+                const myName = document.getElementById('input-player-name').value.trim() || 'Спецназ_01';
+                this.connectToServer(() => {
+                    this.sendRaw({ type: 'quick_match', name: myName });
+                });
+            },
+
+            sendRaw(payload) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    try {
+                        this.ws.send(JSON.stringify(payload));
+                        this.txCount++;
+                    } catch (err) {
+                        DebugLogger.log('ERR', 'Ошибка отправки пакета: ' + err.message, 'error');
+                    }
+                }
+            },
+
+            send(payload) {
+                if (this.connected && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.sendRaw(payload);
+                }
+            },
+
+            sendPingTest() {
+                if (!this.wsOpen) {
+                    DebugLogger.log('NET', 'Пинг-тест: вы не подключены к серверу (режим Solo/Bot).', 'warn');
+                    return;
+                }
+                this.lastPingSent = performance.now();
+                this.sendRaw({ type: 'ping', t: this.lastPingSent, manual: true });
+                DebugLogger.log('NET', 'Отправлен PING-запрос на выделенный сервер...');
+            },
+
+            handlePacket(pkt) {
+                if (!pkt || !pkt.type) return;
+                switch (pkt.type) {
+                    case 'room_created':
+                        this.roomCode = pkt.code;
+                        this.isHost = true;
+                        this.connected = false;
+                        document.getElementById('host-room-code-display').textContent = pkt.code;
+                        document.getElementById('btn-copy-code').disabled = false;
+                        document.getElementById('hud-room-badge').textContent = `СЕРВЕР #${pkt.code}`;
+                        this.setLobbyStatus('emerald', `Комната #${pkt.code} создана на сервере! Ожидание второго игрока...`);
+                        DebugLogger.log('NET', `Сервер создал комнату #${pkt.code}. Ожидание соперника...`);
+                        break;
+
+                    case 'room_joined':
+                        this.roomCode = pkt.code;
+                        this.isHost = !!pkt.isHost;
+                        document.getElementById('host-room-code-display').textContent = pkt.code;
+                        document.getElementById('btn-copy-code').disabled = false;
+                        document.getElementById('hud-room-badge').textContent = `СЕРВЕР #${pkt.code}`;
+                        this.setLobbyStatus('emerald', `Вы вошли в комнату #${pkt.code} на сервере!`);
+                        DebugLogger.log('NET', `Вход в комнату #${pkt.code} выполнен (Хост: ${this.isHost}).`);
+                        break;
+
+                    case 'match_ready':
+                        this.connected = true;
+                        this.roomCode = pkt.code || this.roomCode;
+                        this.isHost = !!pkt.isHost;
+                        Game.remotePlayer.name = pkt.opponentName || 'Соперник';
+                        document.getElementById('hud-enemy-name').textContent = Game.remotePlayer.name;
+                        document.getElementById('hud-room-badge').textContent = `ONLINE #${this.roomCode}`;
+                        this.setLobbyStatus('emerald', `Соперник [${Game.remotePlayer.name}] подключен! Бой начался.`);
+                        DebugLogger.log('NET', `Матч на сервере стартовал! Соперник: [${Game.remotePlayer.name}]`);
+
+                        Game.setBotEnabled(false);
+                        document.getElementById('toggle-bot-enabled').checked = false;
+
+                        const myName = document.getElementById('input-player-name').value.trim() || 'Спецназ_01';
+                        this.send({ type: 'hello', name: myName, isHost: this.isHost });
+
+                        if (!Game.inMatch) {
+                            Game.startMatch();
+                        } else {
+                            Game.respawnLocalPlayer();
+                        }
+                        break;
+
+                    case 'opponent_left':
+                        this.connected = false;
+                        DebugLogger.log('NET', 'Соперник покинул комнату на сервере. Включен бот.', 'warn');
+                        this.setLobbyStatus('amber', `Соперник вышел. Ожидание нового игрока в #${this.roomCode}...`);
+                        Game.setBotEnabled(true);
+                        break;
+
+                    case 'error_msg':
+                        DebugLogger.log('ERR', `Ответ сервера: ${pkt.message}`, 'warn');
+                        this.setLobbyStatus('red', pkt.message);
+                        break;
+
+                    case 'hello':
+                        Game.remotePlayer.name = pkt.name || 'Соперник';
+                        document.getElementById('hud-enemy-name').textContent = Game.remotePlayer.name;
+                        break;
+
+                    case 'state':
+                        Game.onRemoteStatePacket(pkt);
+                        break;
+
+                    case 'shoot':
+                        Game.onRemoteShootPacket(pkt);
+                        break;
+
+                    case 'hit':
+                        Game.onRemoteHitPacket(pkt);
+                        break;
+
+                    case 'respawn':
+                        Game.remotePlayer.hp = 100;
+                        Game.remotePlayer.dead = false;
+                        Game.remotePlayer.mesh.visible = true;
+                        Game.combatStats.dmgGiven = 0;
+                        Game.combatStats.hitsGiven = 0;
+                        document.getElementById('hud-enemy-status').textContent = '100 HP';
+                        break;
+
+                    case 'ping':
+                        this.sendRaw({ type: 'pong', t: pkt.t, manual: pkt.manual });
+                        break;
+
+                    case 'pong':
+                        this.pingMs = Math.max(1, Math.round(performance.now() - pkt.t));
+                        document.getElementById('hud-ping').textContent = this.pingMs + ' ms';
+                        if (pkt.manual) DebugLogger.log('NET', `PONG от сервера получен! Пинг RTT = ${this.pingMs} мс.`);
+                        break;
+                }
+            },
+
+            copyRoomCode() {
+                if (!this.roomCode) return;
+                const ta = document.createElement('textarea');
+                ta.value = this.roomCode;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                const btn = document.getElementById('btn-copy-code');
+                btn.textContent = '✅ Код скопирован!';
+                setTimeout(() => { btn.textContent = '📋 Скопировать код'; }, 2000);
+            },
+
+            setLobbyStatus(color, text) {
+                const dot = document.getElementById('lobby-status-dot');
+                const txt = document.getElementById('lobby-status-text');
+                const badge = document.getElementById('menu-net-badge');
+                if (txt) txt.textContent = text;
+                if (dot) dot.className = `w-3 h-3 rounded-full shrink-0 bg-${color}-400 animate-pulse`;
+                if (badge) {
+                    badge.textContent = this.connected
+                        ? `ОНЛАЙН #${this.roomCode}`
+                        : (this.wsOpen ? `Ожидание #${this.roomCode || '...'}` : 'Режим: Соло');
+                }
+            }
+        };
+
+        /******************************************************************
+         * 5. PROCEDURAL TEXTURE & ARTICULATED 3D MODEL FACTORY
+         *    (AK-47, USP-S, and NEW M9 Bayonet Knife on [3])
+         ******************************************************************/
+        const AssetFactory = {
+            createSandstoneTexture() {
+                const c = document.createElement('canvas');
+                c.width = 256;
+                c.height = 256;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = '#c2a67d';
+                ctx.fillRect(0, 0, 256, 256);
+
+                ctx.strokeStyle = '#9e8259';
+                ctx.lineWidth = 3;
+                for (let y = 0; y < 256; y += 32) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(256, y);
+                    ctx.stroke();
+                    const offset = (y / 32) % 2 === 0 ? 0 : 32;
+                    for (let x = offset; x < 256; x += 64) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, y);
+                        ctx.lineTo(x, y + 32);
+                        ctx.stroke();
+                    }
+                }
+                for (let i = 0; i < 800; i++) {
+                    ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+                    ctx.fillRect(Math.random() * 256, Math.random() * 256, 3, 3);
+                }
+                const tex = new THREE.CanvasTexture(c);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                return tex;
+            },
+
+            createFloorTexture() {
+                const c = document.createElement('canvas');
+                c.width = 256;
+                c.height = 256;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = '#8b775f';
+                ctx.fillRect(0, 0, 256, 256);
+                ctx.strokeStyle = '#736049';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(0, 0, 256, 256);
+                ctx.beginPath();
+                ctx.moveTo(128, 0); ctx.lineTo(128, 256);
+                ctx.moveTo(0, 128); ctx.lineTo(256, 128);
+                ctx.stroke();
+                const tex = new THREE.CanvasTexture(c);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                return tex;
+            },
+
+            createCrateTexture() {
+                const c = document.createElement('canvas');
+                c.width = 256;
+                c.height = 256;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = '#9c6b3b';
+                ctx.fillRect(0, 0, 256, 256);
+                ctx.strokeStyle = '#5c3c1e';
+                ctx.lineWidth = 14;
+                ctx.strokeRect(7, 7, 242, 242);
+
+                ctx.lineWidth = 4;
+                for (let y = 40; y < 240; y += 40) {
+                    ctx.beginPath();
+                    ctx.moveTo(14, y);
+                    ctx.lineTo(242, y);
+                    ctx.stroke();
+                }
+                ctx.lineWidth = 12;
+                ctx.beginPath();
+                ctx.moveTo(14, 14);
+                ctx.lineTo(242, 242);
+                ctx.stroke();
+
+                ctx.fillStyle = 'rgba(20, 20, 20, 0.55)';
+                ctx.font = 'bold 28px monospace';
+                ctx.fillText('CS2-TAC', 70, 136);
+
+                return new THREE.CanvasTexture(c);
+            },
+
+            buildAK47Viewmodel() {
+                const group = new THREE.Group();
+
+                const metalDark = new THREE.MeshStandardMaterial({ color: 0x22262b, roughness: 0.4, metalness: 0.75 });
+                const metalSteel = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.3, metalness: 0.85 });
+                const woodMat = new THREE.MeshStandardMaterial({ color: 0x7c3f16, roughness: 0.65 });
+                const bakeliteOrange = new THREE.MeshStandardMaterial({ color: 0xc2591b, roughness: 0.45 });
+
+                const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.085, 0.36), metalDark);
+                receiver.position.set(0, 0, 0);
+                group.add(receiver);
+
+                const dustCover = new THREE.Mesh(new THREE.BoxGeometry(0.056, 0.032, 0.33), metalSteel);
+                dustCover.position.set(0, 0.048, 0.01);
+                group.add(dustCover);
+
+                const stock = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.095, 0.27), woodMat);
+                stock.position.set(0, -0.025, 0.29);
+                stock.rotation.x = -0.10;
+                group.add(stock);
+
+                const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.060, 0.072, 0.24), woodMat);
+                handguard.position.set(0, 0.005, -0.28);
+                group.add(handguard);
+
+                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.46, 12), metalDark);
+                barrel.rotation.x = Math.PI / 2;
+                barrel.position.set(0, 0.02, -0.50);
+                group.add(barrel);
+
+                const gasTube = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.26, 10), metalSteel);
+                gasTube.rotation.x = Math.PI / 2;
+                gasTube.position.set(0, 0.046, -0.32);
+                group.add(gasTube);
+
+                const frontSight = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.052, 0.024), metalDark);
+                frontSight.position.set(0, 0.048, -0.69);
+                group.add(frontSight);
+
+                // Centered Magazine (`magMesh`)
+                const magMesh = new THREE.Group();
+                const magBodyUpper = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.13, 0.072), bakeliteOrange);
+                magBodyUpper.position.set(0, 0, 0);
+                magBodyUpper.rotation.x = 0.20;
+                const magBodyLower = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.12, 0.072), bakeliteOrange);
+                magBodyLower.position.set(0, -0.095, -0.038);
+                magBodyLower.rotation.x = 0.42;
+                magMesh.add(magBodyUpper, magBodyLower);
+                magMesh.position.set(0, -0.10, -0.09);
+                magMesh.userData.basePos = magMesh.position.clone();
+                group.add(magMesh);
+                group.userData.magMesh = magMesh;
+
+                // Bolt Carrier (`boltGroup`)
+                const boltGroup = new THREE.Group();
+                const boltCarrier = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.028, 0.11), metalSteel);
+                boltCarrier.position.set(0.032, 0.035, -0.04);
+                const chargingKnob = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.038, 8), metalDark);
+                chargingKnob.rotation.z = Math.PI / 2;
+                chargingKnob.position.set(0.050, 0.035, -0.07);
+                boltGroup.add(boltCarrier, chargingKnob);
+                boltGroup.position.set(0, 0, 0);
+                boltGroup.userData.baseZ = 0;
+                group.add(boltGroup);
+                group.userData.boltGroup = boltGroup;
+
+                const grip = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.12, 0.054), woodMat);
+                grip.position.set(0, -0.085, 0.10);
+                grip.rotation.x = -0.26;
+                group.add(grip);
+
+                const muzzlePoint = new THREE.Object3D();
+                muzzlePoint.position.set(0, 0.02, -0.75);
+                group.add(muzzlePoint);
+                group.userData.muzzle = muzzlePoint;
+
+                return group;
+            },
+
+            buildUSPSViewmodel() {
+                const group = new THREE.Group();
+
+                const slideMat = new THREE.MeshStandardMaterial({ color: 0x282c34, roughness: 0.35, metalness: 0.85 });
+                const frameMat = new THREE.MeshStandardMaterial({ color: 0x16191e, roughness: 0.7, metalness: 0.3 });
+                const suppressorMat = new THREE.MeshStandardMaterial({ color: 0x1e2229, roughness: 0.45, metalness: 0.8 });
+                const silverAccent = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.2, metalness: 0.9 });
+
+                const frame = new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.038, 0.23), frameMat);
+                frame.position.set(0, 0, 0);
+                group.add(frame);
+
+                const boltGroup = new THREE.Group();
+                const slide = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.046, 0.235), slideMat);
+                slide.position.set(0, 0.038, 0.005);
+                const rearSight = new THREE.Mesh(new THREE.BoxGeometry(0.040, 0.014, 0.016), frameMat);
+                rearSight.position.set(0, 0.066, 0.105);
+                const frontSight = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.014, 0.016), frameMat);
+                frontSight.position.set(0, 0.066, -0.095);
+                boltGroup.add(slide, rearSight, frontSight);
+                boltGroup.position.set(0, 0, 0);
+                boltGroup.userData.baseZ = 0;
+                group.add(boltGroup);
+                group.userData.boltGroup = boltGroup;
+
+                const chamber = new THREE.Mesh(new THREE.BoxGeometry(0.050, 0.022, 0.052), silverAccent);
+                chamber.position.set(0.001, 0.048, -0.01);
+                group.add(chamber);
+
+                const suppressor = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.26, 16), suppressorMat);
+                suppressor.rotation.x = Math.PI / 2;
+                suppressor.position.set(0, 0.034, -0.245);
+                group.add(suppressor);
+
+                const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.13, 0.064), frameMat);
+                grip.position.set(0, -0.075, 0.07);
+                grip.rotation.x = -0.22;
+                group.add(grip);
+
+                const magMesh = new THREE.Group();
+                const magCore = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.135, 0.050), silverAccent);
+                const magBaseplate = new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.018, 0.068), slideMat);
+                magBaseplate.position.set(0, -0.068, 0.012);
+                magMesh.add(magCore, magBaseplate);
+                magMesh.position.set(0, -0.08, 0.072);
+                magMesh.rotation.x = -0.22;
+                magMesh.userData.basePos = magMesh.position.clone();
+                group.add(magMesh);
+                group.userData.magMesh = magMesh;
+
+                const muzzlePoint = new THREE.Object3D();
+                muzzlePoint.position.set(0, 0.034, -0.39);
+                group.add(muzzlePoint);
+                group.userData.muzzle = muzzlePoint;
+
+                return group;
+            },
+
+            /**
+             * NEW: Builds the 1st-person M9 Bayonet Tactical Knife Viewmodel for Slot [3]
+             */
+            buildKnifeViewmodel() {
+                const group = new THREE.Group();
+
+                const handleMat = new THREE.MeshStandardMaterial({ color: 0x181b20, roughness: 0.72, metalness: 0.22 });
+                const ringMat = new THREE.MeshStandardMaterial({ color: 0x0f1318, roughness: 0.85, metalness: 0.15 });
+                const guardMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.32, metalness: 0.88 });
+                const bladeMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.16, metalness: 0.94 });
+                const fullerMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.8 });
+                const crimsonEdgeMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.25, metalness: 0.85 });
+
+                // Ergonomic Ribbed M9 Grip
+                const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.021, 0.145, 16), handleMat);
+                handle.rotation.x = Math.PI / 2;
+                handle.position.set(0, 0, 0.058);
+                group.add(handle);
+
+                for (let i = 0; i < 5; i++) {
+                    const rib = new THREE.Mesh(new THREE.CylinderGeometry(0.0208, 0.0208, 0.010, 16), ringMat);
+                    rib.rotation.x = Math.PI / 2;
+                    rib.position.set(0, 0, 0.012 + i * 0.023);
+                    group.add(rib);
+                }
+
+                // Pommel Cap & Latch
+                const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.023, 0.021, 0.022, 16), guardMat);
+                pommel.rotation.x = Math.PI / 2;
+                pommel.position.set(0, 0, 0.14);
+                group.add(pommel);
+
+                // Crossguard with M9 Muzzle Ring
+                const guard = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.078, 0.014), guardMat);
+                guard.position.set(0, 0.006, -0.018);
+                group.add(guard);
+
+                const barrelRing = new THREE.Mesh(new THREE.TorusGeometry(0.014, 0.0038, 10, 20), guardMat);
+                barrelRing.position.set(0, 0.038, -0.018);
+                group.add(barrelRing);
+
+                // Seamless 1-Piece Extruded M9 Bayonet Clip-Point Blade (NO crooked ConeGeometry!)
+                const bladeShape = new THREE.Shape();
+                bladeShape.moveTo(0, -0.021);
+                bladeShape.lineTo(0.185, -0.021);       // Straight lower cutting edge
+                bladeShape.quadraticCurveTo(0.235, -0.018, 0.275, 0.003); // Smooth curved belly to sharp point
+                bladeShape.lineTo(0.205, 0.022);        // Clip-point swedge bevel
+                bladeShape.lineTo(0, 0.022);            // Top spine back to guard
+                bladeShape.closePath();
+
+                const bladeGeom = new THREE.ExtrudeGeometry(bladeShape, {
+                    depth: 0.0045,
+                    bevelEnabled: true,
+                    bevelThickness: 0.0018,
+                    bevelSize: 0.0018,
+                    bevelSegments: 2
+                });
+                bladeGeom.translate(0, 0, -0.00225);
+
+                const bladeMesh = new THREE.Mesh(bladeGeom, bladeMat);
+                // Rotate +90 deg around Y so blade length X extends straight forward along -Z
+                bladeMesh.rotation.y = Math.PI / 2;
+                bladeMesh.position.set(0, 0.003, -0.024);
+                group.add(bladeMesh);
+
+                // Blood Groove (Fuller) & Crimson Edge Accent
+                const fuller = new THREE.Mesh(new THREE.BoxGeometry(0.0095, 0.007, 0.145), fullerMat);
+                fuller.position.set(0, 0.008, -0.115);
+                group.add(fuller);
+
+                const crimsonStrip = new THREE.Mesh(new THREE.BoxGeometry(0.009, 0.0035, 0.18), crimsonEdgeMat);
+                crimsonStrip.position.set(0, -0.016, -0.115);
+                group.add(crimsonStrip);
+
+                // Neat Serrated Spine Teeth aligned on the top spine
+                for (let i = 0; i < 6; i++) {
+                    const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.005, 0.010), guardMat);
+                    tooth.position.set(0, 0.026, -0.052 - i * 0.021);
+                    group.add(tooth);
+                }
+
+                // Slight side-tilt in hand so the broad M9 blade profile and clean tip are clearly visible
+                group.rotation.set(0.18, -0.32, 0.28);
+                return group;
+            },
+
+            buildEnemyCharacter() {
+                const root = new THREE.Group();
+
+                const bodyMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7 });
+                const vestMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
+                const helmetMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4, metalness: 0.5 });
+                const visorMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.2, metalness: 0.9 });
+
+                const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.78, 0.24), bodyMat);
+                leftLeg.position.set(-0.15, 0.39, 0);
+                leftLeg.castShadow = true;
+                leftLeg.userData.hitbox = 'body';
+                const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.78, 0.24), bodyMat);
+                rightLeg.position.set(0.15, 0.39, 0);
+                rightLeg.castShadow = true;
+                rightLeg.userData.hitbox = 'body';
+                root.add(leftLeg, rightLeg);
+
+                const torso = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.72, 0.34), vestMat);
+                torso.position.set(0, 1.14, 0);
+                torso.castShadow = true;
+                torso.userData.hitbox = 'body';
+                root.add(torso);
+
+                const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.62, 0.18), bodyMat);
+                leftArm.position.set(-0.39, 1.16, -0.1);
+                leftArm.rotation.x = 0.55;
+                leftArm.userData.hitbox = 'body';
+                const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.62, 0.18), bodyMat);
+                rightArm.position.set(0.39, 1.16, -0.1);
+                rightArm.rotation.x = 0.55;
+                rightArm.userData.hitbox = 'body';
+                root.add(leftArm, rightArm);
+
+                const head = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.38, 0.38), helmetMat);
+                head.position.set(0, 1.72, 0);
+                head.castShadow = true;
+                head.userData.hitbox = 'head';
+                root.add(head);
+
+                const visor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.05), visorMat);
+                visor.position.set(0, 1.74, -0.18);
+                visor.userData.hitbox = 'head';
+                root.add(visor);
+
+                const heldGun = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.08, 0.12, 0.75),
+                    new THREE.MeshStandardMaterial({ color: 0x111827, metalness: 0.7 })
+                );
+                heldGun.position.set(0.26, 1.22, -0.38);
+                root.add(heldGun);
+
+                const headWire = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.42, 0.42, 0.42),
+                    new THREE.MeshBasicMaterial({ color: 0xff2222, wireframe: true })
+                );
+                headWire.position.copy(head.position);
+                headWire.visible = false;
+
+                const bodyWire = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.68, 0.85, 0.42),
+                    new THREE.MeshBasicMaterial({ color: 0x22ff66, wireframe: true })
+                );
+                bodyWire.position.copy(torso.position);
+                bodyWire.visible = false;
+                root.add(headWire, bodyWire);
+
+                root.userData = {
+                    head,
+                    torso,
+                    leftLeg,
+                    rightLeg,
+                    heldGun,
+                    headWire,
+                    bodyWire
+                };
+
+                return root;
+            }
+        };
+
+        /******************************************************************
+         * 6. CORE 3D GAME ENGINE
+         ******************************************************************/
+        const Game = {
+            scene: null,
+            camera: null,
+            renderer: null,
+            weaponContainer: null,
+            models: {},
+            colliders: [],
+            worldMeshes: [],
+            particles: [],
+
+            inMatch: false,
+            pointerLocked: false,
+            isPaused: false,
+            ignoreMouseFrames: 0,
+            wireframeHitboxes: false,
+            botEnabled: true,
+
+            // Combat Damage & Hit Counters for the CS2 Death Card
+            combatStats: {
+                dmgGiven: 0,
+                hitsGiven: 0,
+                dmgTaken: 0,
+                hitsTaken: 0
+            },
+
+            // Local Player State
+            player: {
+                pos: new THREE.Vector3(0, 0, 18),
+                vel: new THREE.Vector3(0, 0, 0),
+                yaw: 0,
+                pitch: 0,
+                height: 1.72,
+                radius: 0.42,
+                grounded: true,
+                crouching: false,
+                hp: 100,
+                armor: 100,
+                dead: false,
+                kills: 0,
+                deaths: 0,
+                activeWeapon: 'ak47',
+                lastWeapon: 'usps',
+                reloading: false,
+                reloadElapsed: 0,
+                reloadDuration: 2.1,
+                reloadStage: 0,
+                inspectTimer: 0,
+                knifeSwingTimer: 0,
+                knifeSwingType: 'light',
+                recoilPitch: 0,
+                recoilYaw: 0,
+                dynamicSpread: 0,
+                lastShotTime: 0,
+                stepAccumulator: 0
+            },
+
+            // Weapons Config (AK-47 [1], USP-S [2], M9 Bayonet Knife [3])
+            weapons: {
+                ak47: {
+                    key: 'ak47',
+                    name: 'AK-47 КАЛАШНИКОВ',
+                    shortName: 'AK-47',
+                    subtitle: 'АВТОМАТ • 7.62 ММ',
+                    auto: true,
+                    melee: false,
+                    fireDelay: 100,
+                    clip: 30,
+                    maxClip: 30,
+                    reserve: 90,
+                    maxReserve: 90,
+                    reloadTime: 2.15,
+                    dmgBody: 36,
+                    dmgHead: 112,
+                    recoilKickPitch: 0.024,
+                    recoilKickYaw: 0.009,
+                    baseSpread: 0.0035,
+                    moveSpread: 0.030
+                },
+                usps: {
+                    key: 'usps',
+                    name: 'USP-S TACTICAL',
+                    shortName: 'USP-S',
+                    subtitle: 'ПИСТОЛЕТ С ГЛУШИТЕЛЕМ • .45 ACP',
+                    auto: false,
+                    melee: false,
+                    fireDelay: 160,
+                    clip: 12,
+                    maxClip: 12,
+                    reserve: 24,
+                    maxReserve: 24,
+                    reloadTime: 1.75,
+                    dmgBody: 35,
+                    dmgHead: 100,
+                    recoilKickPitch: 0.013,
+                    recoilKickYaw: 0.0035,
+                    baseSpread: 0.001,
+                    moveSpread: 0.011
+                },
+                knife: {
+                    key: 'knife',
+                    name: 'НОЖ M9 BAYONET',
+                    shortName: 'M9 Bayonet',
+                    subtitle: 'ЛКМ: БЫСТРЫЙ • ПКМ: СИЛЬНЫЙ УДАР',
+                    auto: false,
+                    melee: true,
+                    fireDelay: 400,
+                    heavyDelay: 820,
+                    clip: '∞',
+                    maxClip: 0,
+                    reserve: '∞',
+                    maxReserve: 0,
+                    reloadTime: 0,
+                    dmgBody: 40,
+                    dmgHead: 65,
+                    heavyDmgBody: 65,
+                    heavyDmgHead: 100,
+                    range: 3.15,
+                    recoilKickPitch: 0,
+                    recoilKickYaw: 0,
+                    baseSpread: 0,
+                    moveSpread: 0
+                }
+            },
+
+            remotePlayer: {
+                name: 'BOT_Алексей',
+                pos: new THREE.Vector3(0, 0, -18),
+                targetPos: new THREE.Vector3(0, 0, -18),
+                yaw: Math.PI,
+                targetYaw: Math.PI,
+                hp: 100,
+                dead: false,
+                weapon: 'ak47',
+                mesh: null,
+                aiState: 'PATROL',
+                hasLOS: false,
+                losSeeTime: 0,
+                strafeDir: 1,
+                strafeTimer: 0,
+                waypointIdx: 0,
+                botLastShot: 0,
+                crouching: false
+            },
+
+            botWaypoints: [
+                new THREE.Vector3(0, 0, -9),
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, 0, 8),
+                new THREE.Vector3(-18, 0, -12),
+                new THREE.Vector3(-18, 0, 0),
+                new THREE.Vector3(-18, 0, 12),
+                new THREE.Vector3(18, 0, -12),
+                new THREE.Vector3(18, 0, 0),
+                new THREE.Vector3(18, 0, 12),
+                new THREE.Vector3(-6, 0, -18),
+                new THREE.Vector3(6, 0, -18)
+            ],
+
+            keys: {},
+            mouseDown: false,
+            swayX: 0,
+            swayY: 0,
+
+            fps: 60,
+            frameMs: 16.6,
+            frameCount: 0,
+            lastFpsUpdate: performance.now(),
+            lastFrameTime: performance.now(),
+            lastNetSend: 0,
+            loopChannel: null,
+            loopRunning: false,
+
+            init() {
+                const canvas = document.getElementById('game-canvas');
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x87b5d6);
+                this.scene.fog = new THREE.FogExp2(0x87b5d6, 0.011);
+
+                this.camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.08, 160);
+                this.camera.rotation.order = 'YXZ';
+                this.camera.up.set(0, 1, 0);
+                this.scene.add(this.camera);
+
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas,
+                    antialias: true,
+                    powerPreference: 'high-performance',
+                    desynchronized: true
+                });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+                // High-frequency MessageChannel for Uncapped FPS loop
+                this.loopChannel = new MessageChannel();
+                this.loopChannel.port1.onmessage = () => this.tickLoop();
+
+                this.setupLighting();
+                this.buildArenaMap();
+                this.setupViewmodels();
+                this.setupEnemyEntity();
+                this.bindEvents();
+            },
+
+            setupLighting() {
+                const hemi = new THREE.HemisphereLight(0xfffbeb, 0x475569, 0.74);
+                this.scene.add(hemi);
+
+                const dirLight = new THREE.DirectionalLight(0xfff7ed, 0.95);
+                dirLight.position.set(22, 38, 18);
+                dirLight.castShadow = true;
+                dirLight.shadow.mapSize.width = 2048;
+                dirLight.shadow.mapSize.height = 2048;
+                dirLight.shadow.camera.near = 1;
+                dirLight.shadow.camera.far = 100;
+                const d = 32;
+                dirLight.shadow.camera.left = -d;
+                dirLight.shadow.camera.right = d;
+                dirLight.shadow.camera.top = d;
+                dirLight.shadow.camera.bottom = -d;
+                this.scene.add(dirLight);
+            },
+
+            buildArenaMap() {
+                const wallTex = AssetFactory.createSandstoneTexture();
+                const floorTex = AssetFactory.createFloorTexture();
+                const crateTex = AssetFactory.createCrateTexture();
+
+                floorTex.repeat.set(20, 20);
+                const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85 });
+                const floor = new THREE.Mesh(new THREE.PlaneGeometry(56, 56), floorMat);
+                floor.rotation.x = -Math.PI / 2;
+                floor.receiveShadow = true;
+                floor.userData.isWorld = true;
+                this.scene.add(floor);
+                this.worldMeshes.push(floor);
+
+                const addBox = (x, y, z, w, h, d, tex, isCrate = false) => {
+                    const t = tex.clone();
+                    t.needsUpdate = true;
+                    if (!isCrate) t.repeat.set(Math.max(1, Math.round(Math.max(w, d) / 4)), Math.max(1, Math.round(h / 3)));
+                    const mat = new THREE.MeshStandardMaterial({ map: t, roughness: 0.75 });
+                    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+                    mesh.position.set(x, y + h / 2, z);
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                    mesh.userData.isWorld = true;
+                    this.scene.add(mesh);
+                    this.worldMeshes.push(mesh);
+
+                    this.colliders.push({
+                        minX: x - w / 2,
+                        maxX: x + w / 2,
+                        minY: y,
+                        maxY: y + h,
+                        minZ: z - d / 2,
+                        maxZ: z + d / 2
+                    });
+                };
+
+                addBox(0, 0, -25, 50, 6.5, 1.5, wallTex);
+                addBox(0, 0, 25, 50, 6.5, 1.5, wallTex);
+                addBox(-25, 0, 0, 1.5, 6.5, 50, wallTex);
+                addBox(25, 0, 0, 1.5, 6.5, 50, wallTex);
+
+                addBox(-8.5, 0, 0, 11, 4.2, 1.2, wallTex);
+                addBox(8.5, 0, 0, 11, 4.2, 1.2, wallTex);
+
+                addBox(0, 0, 14, 7.0, 2.8, 1.0, wallTex);
+                addBox(0, 0, -14, 7.0, 2.8, 1.0, wallTex);
+
+                addBox(-14, 0, -9, 1.2, 4.0, 8, wallTex);
+                addBox(14, 0, 9, 1.2, 4.0, 8, wallTex);
+
+                addBox(-4.5, 0, 6.5, 2.2, 2.0, 2.2, crateTex, true);
+                addBox(4.5, 0, -6.5, 2.2, 2.0, 2.2, crateTex, true);
+
+                addBox(-10, 0, 10, 2.4, 2.2, 2.4, crateTex, true);
+                addBox(-10, 2.2, 10, 2.0, 2.0, 2.0, crateTex, true);
+                addBox(-7.7, 0, 10, 1.8, 1.1, 1.8, crateTex, true);
+
+                addBox(10, 0, -10, 2.4, 2.2, 2.4, crateTex, true);
+                addBox(7.7, 0, -10, 1.8, 1.1, 1.8, crateTex, true);
+
+                addBox(2.4, 0, 2.8, 1.6, 1.4, 1.6, crateTex, true);
+                addBox(-2.4, 0, -2.8, 1.6, 1.4, 1.6, crateTex, true);
+            },
+
+            setupViewmodels() {
+                this.weaponContainer = new THREE.Group();
+                // CHANGE 8: Hide weaponContainer while in Main Menu background flyover!
+                this.weaponContainer.visible = false;
+                this.camera.add(this.weaponContainer);
+
+                this.models.ak47 = AssetFactory.buildAK47Viewmodel();
+                this.models.usps = AssetFactory.buildUSPSViewmodel();
+                this.models.knife = AssetFactory.buildKnifeViewmodel();
+
+                this.models.ak47.position.set(0.24, -0.22, -0.42);
+                this.models.usps.position.set(0.22, -0.20, -0.38);
+                this.models.knife.position.set(0.21, -0.19, -0.34);
+
+                this.weaponContainer.add(this.models.ak47);
+                this.weaponContainer.add(this.models.usps);
+                this.weaponContainer.add(this.models.knife);
+
+                this.muzzleLight = new THREE.PointLight(0xffb732, 0, 6);
+                this.muzzleLight.position.set(0.2, -0.1, -0.9);
+                this.camera.add(this.muzzleLight);
+
+                this.switchWeapon('ak47', true);
+            },
+
+            setupEnemyEntity() {
+                this.remotePlayer.mesh = AssetFactory.buildEnemyCharacter();
+                this.remotePlayer.mesh.position.copy(this.remotePlayer.pos);
+                this.scene.add(this.remotePlayer.mesh);
+            },
+
+            bindEvents() {
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+
+                document.addEventListener('pointerlockchange', () => {
+                    this.pointerLocked = (document.pointerLockElement === document.getElementById('game-canvas'));
+                    this.ignoreMouseFrames = 2;
+                    this.mouseDown = false;
+                    this.camera.rotation.order = 'YXZ';
+                    this.camera.rotation.z = 0;
+                    this.updatePauseState();
+                });
+
+                window.addEventListener('blur', () => {
+                    this.keys = {};
+                    this.mouseDown = false;
+                    this.updatePauseState();
+                });
+
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) {
+                        this.keys = {};
+                        this.mouseDown = false;
+                    }
+                    this.updatePauseState();
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (!this.pointerLocked || !this.inMatch || this.isPaused || this.player.dead) return;
+
+                    if (this.ignoreMouseFrames > 0) {
+                        this.ignoreMouseFrames--;
+                        return;
+                    }
+                    if (Math.abs(e.movementX) > 250 || Math.abs(e.movementY) > 250) return;
+
+                    const sens = Settings.data.sensitivity * 0.0018;
+                    const inv = Settings.data.invertY ? -1 : 1;
+
+                    this.player.yaw -= e.movementX * sens;
+                    this.player.pitch -= e.movementY * sens * inv;
+
+                    const maxPitch = Math.PI * 0.47;
+                    this.player.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.player.pitch));
+
+                    this.swayX = Math.max(-0.035, Math.min(0.035, this.swayX - e.movementX * 0.00028));
+                    this.swayY = Math.max(-0.035, Math.min(0.035, this.swayY - e.movementY * 0.00028));
+                });
+
+                document.addEventListener('mousedown', (e) => {
+                    if (!this.inMatch || this.isPaused) return;
+                    if (!this.pointerLocked) {
+                        if (e.target.id === 'game-canvas') this.requestPointerLock();
+                        return;
+                    }
+                    if (e.button === 0) {
+                        this.mouseDown = true;
+                        this.tryFireWeapon(false);
+                    } else if (e.button === 2) {
+                        // Right-click heavy stab for M9 Bayonet Knife
+                        if (this.player.activeWeapon === 'knife') {
+                            this.tryFireWeapon(true);
+                        }
+                    }
+                });
+
+                document.addEventListener('mouseup', (e) => {
+                    if (e.button === 0) this.mouseDown = false;
+                });
+
+                document.addEventListener('wheel', (e) => {
+                    if (!this.pointerLocked || !this.inMatch || this.isPaused || this.player.dead) return;
+                    const order = ['ak47', 'usps', 'knife'];
+                    const idx = order.indexOf(this.player.activeWeapon);
+                    const dir = e.deltaY > 0 ? 1 : -1;
+                    const nextIdx = (idx + dir + order.length) % order.length;
+                    this.switchWeapon(order[nextIdx]);
+                });
+
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+
+                    // CHANGE 3: Toggle Debug Menu (` / ~ or F3) WITHOUT unlocking mouse or pausing game!
+                    if (e.code === 'Backquote' || e.code === 'F3') {
+                        e.preventDefault();
+                        UI.toggleDebug();
+                        return;
+                    }
+
+                    // Toggle Settings (KeyP)
+                    if (e.code === 'KeyP') {
+                        UI.openSettings();
+                        return;
+                    }
+
+                    // Hotkey [H]: Instant Left / Right Hand Switch
+                    if (e.code === 'KeyH' && this.inMatch) {
+                        Settings.toggleHand();
+                        return;
+                    }
+
+                    if (!this.inMatch || !this.pointerLocked || this.isPaused || this.player.dead) return;
+
+                    if (e.code === 'Digit1') this.switchWeapon('ak47');
+                    if (e.code === 'Digit2') this.switchWeapon('usps');
+                    if (e.code === 'Digit3') this.switchWeapon('knife');
+                    if (e.code === 'KeyQ') this.switchWeapon(this.player.lastWeapon);
+                    if (e.code === 'KeyR') this.startReloadWeapon();
+                    if (e.code === 'KeyF' && !this.player.reloading) this.player.inspectTimer = 1.6;
+                    if (e.code === 'Space' && this.player.grounded && !this.player.dead) {
+                        this.player.vel.y = 7.6;
+                        this.player.grounded = false;
+                    }
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+            },
+
+            /**
+             * CHANGE 3: Debug panel does NOT pause the game or show pause overlay
+             */
+            updatePauseState() {
+                if (!this.inMatch) {
+                    this.isPaused = false;
+                    document.getElementById('pause-overlay').classList.add('hidden');
+                    return;
+                }
+                const settingsOpen = !document.getElementById('settings-modal').classList.contains('hidden');
+                this.isPaused = !this.pointerLocked || settingsOpen || document.hidden;
+
+                const pauseOverlay = document.getElementById('pause-overlay');
+                if (this.isPaused && !settingsOpen) {
+                    pauseOverlay.classList.remove('hidden');
+                } else {
+                    pauseOverlay.classList.add('hidden');
+                }
+            },
+
+            requestPointerLock() {
+                const canvas = document.getElementById('game-canvas');
+                try {
+                    canvas.requestPointerLock();
+                    SoundFX.ensureContext();
+                } catch (e) {
+                    DebugLogger.log('ERR', 'Ошибка PointerLock: ' + e.message, 'warn');
+                }
+            },
+
+            startMatch() {
+                const nameInput = document.getElementById('input-player-name').value.trim() || 'Спецназ_01';
+                document.getElementById('hud-local-name').textContent = nameInput;
+
+                document.getElementById('main-menu').classList.add('hidden');
+                document.getElementById('settings-modal').classList.add('hidden');
+                document.getElementById('hud-layer').classList.remove('hidden');
+
+                this.inMatch = true;
+                this.weaponContainer.visible = true;
+                this.respawnLocalPlayer();
+                this.requestPointerLock();
+                this.updatePauseState();
+                DebugLogger.log('SYS', `Матч запущен! Игрок: ${nameInput}. Сложность бота: ${Settings.data.botDifficulty.toUpperCase()}`);
+            },
+
+            setBotEnabled(enabled) {
+                this.botEnabled = enabled;
+                if (this.remotePlayer.mesh) {
+                    this.remotePlayer.mesh.visible = enabled || Network.connected;
+                }
+                DebugLogger.log('SYS', `Спарринг-бот (ИИ): ${enabled ? 'ВКЛЮЧЕН' : 'ВЫКЛЮЧЕН'}`);
+            },
+
+            toggleWireframeHitboxes() {
+                this.wireframeHitboxes = !this.wireframeHitboxes;
+                if (this.remotePlayer.mesh) {
+                    this.remotePlayer.mesh.userData.headWire.visible = this.wireframeHitboxes;
+                    this.remotePlayer.mesh.userData.bodyWire.visible = this.wireframeHitboxes;
+                }
+                DebugLogger.log('SYS', `Отображение 3D Wireframe хитбоксов: ${this.wireframeHitboxes ? 'ВКЛ' : 'ВЫКЛ'}`);
+            },
+
+            refillPlayer() {
+                this.player.hp = 100;
+                this.player.armor = 100;
+                this.weapons.ak47.clip = 30;
+                this.weapons.ak47.reserve = 90;
+                this.weapons.usps.clip = 12;
+                this.weapons.usps.reserve = 24;
+                this.cancelReload();
+                this.updateHUD();
+                DebugLogger.log('WEAPON', 'Боезапас и здоровье полностью восстановлены (+100 HP).');
+            },
+
+            cancelReload() {
+                this.player.reloading = false;
+                this.player.reloadElapsed = 0;
+                this.player.reloadStage = 0;
+
+                ['ak47', 'usps'].forEach(k => {
+                    const m = this.models[k];
+                    if (m && m.userData.magMesh) {
+                        m.userData.magMesh.position.copy(m.userData.magMesh.userData.basePos);
+                    }
+                    if (m && m.userData.boltGroup) {
+                        m.userData.boltGroup.position.z = m.userData.boltGroup.userData.baseZ;
+                    }
+                });
+            },
+
+            switchWeapon(weaponKey, silent = false) {
+                if (!this.weapons[weaponKey]) return;
+                if (this.player.activeWeapon === weaponKey && !silent) return;
+
+                this.cancelReload();
+                this.player.inspectTimer = 0;
+                this.player.knifeSwingTimer = 0;
+                if (this.player.activeWeapon !== weaponKey) {
+                    this.player.lastWeapon = this.player.activeWeapon;
+                }
+                this.player.activeWeapon = weaponKey;
+
+                this.models.ak47.visible = (weaponKey === 'ak47');
+                this.models.usps.visible = (weaponKey === 'usps');
+                this.models.knife.visible = (weaponKey === 'knife');
+
+                this.weaponContainer.position.y = -0.14;
+
+                const sAk = document.getElementById('slot-ak47');
+                const sUsp = document.getElementById('slot-usps');
+                const sKnife = document.getElementById('slot-knife');
+                const inactiveClass = 'px-4 py-1.5 rounded-lg border transition-all flex items-center gap-3 bg-slate-900/70 border-white/10 text-slate-400';
+
+                sAk.className = weaponKey === 'ak47'
+                    ? 'px-4 py-1.5 rounded-lg border transition-all flex items-center gap-3 bg-amber-500/20 border-amber-400 text-white shadow-lg'
+                    : inactiveClass;
+                sUsp.className = weaponKey === 'usps'
+                    ? 'px-4 py-1.5 rounded-lg border transition-all flex items-center gap-3 bg-sky-500/20 border-sky-400 text-white shadow-lg'
+                    : inactiveClass;
+                sKnife.className = weaponKey === 'knife'
+                    ? 'px-4 py-1.5 rounded-lg border transition-all flex items-center gap-3 bg-emerald-500/20 border-emerald-400 text-white shadow-lg'
+                    : inactiveClass;
+
+                this.updateHUD();
+                if (!silent) {
+                    if (weaponKey === 'knife') SoundFX.playKnifeSlash(false);
+                    else SoundFX.playMagIn();
+                    DebugLogger.log('WEAPON', `Смена оружия на: ${this.weapons[weaponKey].name}`);
+                }
+            },
+
+            /**
+             * CHANGE 2: 3-Stage Reload WITHOUT the center-screen popup box
+             */
+            startReloadWeapon() {
+                const w = this.weapons[this.player.activeWeapon];
+                if (w.melee || this.player.reloading || w.clip >= w.maxClip || w.reserve <= 0 || this.player.dead) return;
+
+                this.player.reloading = true;
+                this.player.reloadElapsed = 0;
+                this.player.reloadDuration = w.reloadTime;
+                this.player.reloadStage = 1;
+                this.player.inspectTimer = 0;
+
+                SoundFX.playMagOut();
+                document.getElementById('hud-reload-state').textContent = 'ПЕРЕЗАРЯДКА...';
+                DebugLogger.log('WEAPON', `Начата перезарядка ${w.key.toUpperCase()}...`);
+            },
+
+            updateReloadSystem(dt) {
+                if (!this.player.reloading) return;
+
+                this.player.reloadElapsed += dt;
+                const progress = Math.min(1, this.player.reloadElapsed / this.player.reloadDuration);
+
+                if (progress >= 0.38 && this.player.reloadStage === 1) {
+                    this.player.reloadStage = 2;
+                    SoundFX.playMagIn();
+                } else if (progress >= 0.72 && this.player.reloadStage === 2) {
+                    this.player.reloadStage = 3;
+                    SoundFX.playBoltRack();
+                }
+
+                if (progress >= 1.0) {
+                    const w = this.weapons[this.player.activeWeapon];
+                    const needed = w.maxClip - w.clip;
+                    const take = Math.min(needed, w.reserve);
+                    w.clip += take;
+                    w.reserve -= take;
+                    this.cancelReload();
+                    this.updateHUD();
+                    DebugLogger.log('WEAPON', `Перезарядка ${w.key.toUpperCase()} завершена (${w.clip}/${w.reserve}).`);
+                }
+            },
+
+            /**
+             * CHANGE 5: Supports Firearms (AK-47 / USP-S) and M9 Bayonet Knife (Light LMB & Heavy RMB)
+             */
+            tryFireWeapon(isHeavyAttack = false) {
+                if (this.player.dead || this.player.reloading || this.isPaused) return;
+                const w = this.weapons[this.player.activeWeapon];
+                const now = performance.now();
+
+                // M9 Bayonet Melee Attack
+                if (w.melee) {
+                    const delay = isHeavyAttack ? w.heavyDelay : w.fireDelay;
+                    if (now - this.player.lastShotTime < delay) return;
+
+                    this.player.lastShotTime = now;
+                    this.player.inspectTimer = 0;
+                    this.player.knifeSwingType = isHeavyAttack ? 'heavy' : 'light';
+                    this.player.knifeSwingTimer = isHeavyAttack ? 0.38 : 0.24;
+
+                    SoundFX.playKnifeSlash(isHeavyAttack);
+
+                    const raycaster = new THREE.Raycaster();
+                    raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+                    raycaster.far = w.range;
+
+                    const targets = [];
+                    this.scene.traverse((obj) => {
+                        if (obj.isMesh && (obj.userData.isWorld || obj.userData.hitbox)) {
+                            targets.push(obj);
+                        }
+                    });
+
+                    const hits = raycaster.intersectObjects(targets, false);
+                    if (hits.length > 0) {
+                        const firstHit = hits[0];
+                        if (firstHit.object.userData.hitbox && !this.remotePlayer.dead && (this.botEnabled || Network.connected)) {
+                            const isHead = (firstHit.object.userData.hitbox === 'head');
+                            const dmg = isHeavyAttack
+                                ? (isHead ? w.heavyDmgHead : w.heavyDmgBody)
+                                : (isHead ? w.dmgHead : w.dmgBody);
+                            this.onLocalHitEnemy(dmg, isHead, firstHit.point, 'knife');
+                        } else if (firstHit.face) {
+                            this.spawnImpactParticles(firstHit.point, firstHit.face.normal, false);
+                            SoundFX.playBoltRack();
+                        }
+                    }
+                    return;
+                }
+
+                // Firearm Attack (AK-47 / USP-S)
+                if (now - this.player.lastShotTime < w.fireDelay) return;
+
+                if (w.clip <= 0) {
+                    if (Settings.data.autoReload && w.reserve > 0) {
+                        this.startReloadWeapon();
+                    }
+                    return;
+                }
+
+                this.player.lastShotTime = now;
+                this.player.inspectTimer = 0;
+                w.clip--;
+                this.updateHUD();
+
+                SoundFX.playGunshot(w.key, 0);
+
+                const activeModel = this.models[w.key];
+                activeModel.position.z += 0.055;
+                activeModel.rotation.x += 0.075;
+                if (activeModel.userData.boltGroup) {
+                    activeModel.userData.boltGroup.position.z = 0.055;
+                }
+
+                this.muzzleLight.intensity = w.key === 'ak47' ? 3.0 : 0.7;
+                setTimeout(() => { this.muzzleLight.intensity = 0; }, 45);
+
+                const speed2D = Math.hypot(this.player.vel.x, this.player.vel.z);
+                const crouchFactor = this.player.crouching ? 0.55 : 1.0;
+                const airSpread = !this.player.grounded ? 0.05 : 0;
+                const totalSpread = (w.baseSpread + (speed2D / 8) * w.moveSpread + airSpread + this.player.recoilPitch * 0.25) * crouchFactor;
+
+                this.player.dynamicSpread = Math.min(22, this.player.dynamicSpread + (w.key === 'ak47' ? 5.2 : 3.0));
+
+                const spreadX = (Math.random() - 0.5) * totalSpread;
+                const spreadY = (Math.random() - 0.5) * totalSpread;
+
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(spreadX, spreadY), this.camera);
+
+                this.player.recoilPitch = Math.min(0.18, this.player.recoilPitch + w.recoilKickPitch * crouchFactor);
+                const maxPitch = Math.PI * 0.47;
+                this.player.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.player.pitch + w.recoilKickPitch * crouchFactor));
+                this.player.yaw += (Math.random() - 0.5) * 2 * w.recoilKickYaw;
+
+                const targets = [];
+                this.scene.traverse((obj) => {
+                    if (obj.isMesh && (obj.userData.isWorld || obj.userData.hitbox)) {
+                        targets.push(obj);
+                    }
+                });
+
+                const hits = raycaster.intersectObjects(targets, false);
+                let hitPoint = raycaster.ray.at(80, new THREE.Vector3());
+
+                if (hits.length > 0) {
+                    const firstHit = hits[0];
+                    hitPoint = firstHit.point;
+
+                    if (firstHit.object.userData.hitbox && !this.remotePlayer.dead && (this.botEnabled || Network.connected)) {
+                        const isHead = (firstHit.object.userData.hitbox === 'head');
+                        const dmg = isHead ? w.dmgHead : w.dmgBody;
+                        this.onLocalHitEnemy(dmg, isHead, hitPoint, w.key);
+                    } else if (firstHit.face) {
+                        this.spawnImpactParticles(hitPoint, firstHit.face.normal, false);
+                    }
+                }
+
+                if (Settings.data.tracers) {
+                    const muzzleWorld = new THREE.Vector3();
+                    activeModel.userData.muzzle.getWorldPosition(muzzleWorld);
+                    this.spawnTracer(muzzleWorld, hitPoint, w.key === 'ak47' ? 0xfbbf24 : 0x94a3b8);
+                    this.spawnShellCasing(muzzleWorld);
+                }
+
+                Network.send({
+                    type: 'shoot',
+                    weapon: w.key,
+                    hx: hitPoint.x,
+                    hy: hitPoint.y,
+                    hz: hitPoint.z
+                });
+
+                if (w.clip === 0 && Settings.data.autoReload && w.reserve > 0) {
+                    this.startReloadWeapon();
+                }
+            },
+
+            onLocalHitEnemy(dmg, isHead, hitPoint, weaponKey) {
+                // Track Damage Given & Hits Given strictly for the opponent's CURRENT life
+                const actualDmg = Math.min(this.remotePlayer.hp, dmg);
+                this.combatStats.dmgGiven += actualDmg;
+                this.combatStats.hitsGiven += 1;
+
+                SoundFX.playHitmarker(isHead);
+                UI.showHitmarker(isHead);
+                UI.spawnFloatingDamage(dmg, isHead, hitPoint);
+                this.spawnImpactParticles(hitPoint, new THREE.Vector3(0, 1, 0), true);
+
+                this.remotePlayer.hp = Math.max(0, this.remotePlayer.hp - dmg);
+                document.getElementById('hud-enemy-status').textContent = `${this.remotePlayer.hp} HP`;
+
+                DebugLogger.log('WEAPON', `Попадание по [${this.remotePlayer.name}] из ${weaponKey.toUpperCase()} (${isHead ? 'В ГОЛОВУ 🎯' : 'В ТЕЛО'}) -> -${dmg} HP (Осталось: ${this.remotePlayer.hp} HP)`);
+
+                Network.send({ type: 'hit', dmg, isHead, weapon: weaponKey });
+
+                if (this.remotePlayer.hp <= 0 && !this.remotePlayer.dead) {
+                    this.remotePlayer.dead = true;
+                    this.remotePlayer.mesh.visible = false;
+                    this.player.kills++;
+                    // Reset damage given to opponent when opponent dies so next opponent life starts at 0!
+                    this.combatStats.dmgGiven = 0;
+                    this.combatStats.hitsGiven = 0;
+                    this.updateHUD();
+
+                    const myName = document.getElementById('hud-local-name').textContent;
+                    UI.addKillfeedEntry(myName, this.remotePlayer.name, weaponKey, isHead);
+                    UI.flashKillEffect();
+
+                    if (!Network.connected && this.botEnabled) {
+                        setTimeout(() => {
+                            this.respawnBot();
+                        }, 2200);
+                    }
+                }
+            },
+
+            respawnBot() {
+                this.remotePlayer.hp = 100;
+                this.remotePlayer.dead = false;
+                // Ensure per-life damage given to opponent starts fresh at 0 on bot respawn
+                this.combatStats.dmgGiven = 0;
+                this.combatStats.hitsGiven = 0;
+                const spawnX = (Math.random() > 0.5 ? 1 : -1) * (6 + Math.random() * 10);
+                const spawnZ = this.player.pos.z > 0 ? -18 : 18;
+                this.remotePlayer.pos.set(spawnX, 0, spawnZ);
+                this.remotePlayer.mesh.position.copy(this.remotePlayer.pos);
+                this.remotePlayer.mesh.visible = true;
+                document.getElementById('hud-enemy-status').textContent = '100 HP';
+            },
+
+            onRemoteStatePacket(pkt) {
+                this.remotePlayer.targetPos.set(pkt.x, pkt.y, pkt.z);
+                this.remotePlayer.targetYaw = pkt.yaw;
+                this.remotePlayer.weapon = pkt.weapon || 'ak47';
+                if (typeof pkt.hp === 'number') {
+                    this.remotePlayer.hp = pkt.hp;
+                    document.getElementById('hud-enemy-status').textContent = `${pkt.hp} HP`;
+                }
+            },
+
+            onRemoteShootPacket(pkt) {
+                const dist = this.player.pos.distanceTo(this.remotePlayer.pos);
+                SoundFX.playGunshot(pkt.weapon || 'ak47', dist);
+                const start = this.remotePlayer.pos.clone().add(new THREE.Vector3(0, 1.35, 0));
+                const end = new THREE.Vector3(pkt.hx, pkt.hy, pkt.hz);
+                this.spawnTracer(start, end, 0xf87171);
+            },
+
+            onRemoteHitPacket(pkt) {
+                if (this.player.dead) return;
+                this.applyDamageToLocal(pkt.dmg || 35, this.remotePlayer.name, pkt.weapon || 'ak47', pkt.isHead);
+            },
+
+            /**
+             * CHANGE 1: Red-Black Death Screen & CS2/CS:GO Death Card with Damage Taken & Damage Given
+             */
+            applyDamageToLocal(dmg, attackerName, weaponKey, isHead = false) {
+                if (this.player.dead) return;
+
+                // Track Damage Taken & Hits Taken
+                this.combatStats.dmgTaken += dmg;
+                this.combatStats.hitsTaken += 1;
+
+                this.player.hp = Math.max(0, this.player.hp - dmg);
+                this.player.armor = Math.max(0, this.player.armor - Math.round(dmg * 0.35));
+                this.updateHUD();
+                UI.flashDamageVignette();
+
+                DebugLogger.log('WEAPON', `Получен урон от [${attackerName}]: -${dmg} HP (${weaponKey.toUpperCase()}${isHead ? ' HS!' : ''})`);
+
+                if (this.player.hp <= 0) {
+                    this.player.dead = true;
+                    this.player.deaths++;
+                    this.cancelReload();
+                    this.weaponContainer.visible = false; // Hide viewmodel while dead
+                    this.updateHUD();
+
+                    const myName = document.getElementById('hud-local-name').textContent;
+                    UI.addKillfeedEntry(attackerName, myName, weaponKey, isHead);
+
+                    // Activate Red-Black Death Screen Overlay & Populate CS2 Death Card
+                    UI.showDeathScreen(attackerName, weaponKey, isHead, this.combatStats);
+
+                    const banner = document.getElementById('respawn-banner');
+                    let remaining = 3.2;
+                    const timerEl = document.getElementById('respawn-timer');
+                    if (timerEl) timerEl.textContent = remaining.toFixed(1);
+
+                    const interval = setInterval(() => {
+                        if (this.isPaused) return;
+                        remaining -= 0.1;
+                        if (timerEl) timerEl.textContent = Math.max(0, remaining).toFixed(1);
+                        if (remaining <= 0) {
+                            clearInterval(interval);
+                            banner.classList.add('hidden');
+                            document.getElementById('death-screen-overlay').style.opacity = '0';
+                            this.respawnLocalPlayer();
+                        }
+                    }, 100);
+                }
+            },
+
+            respawnLocalPlayer() {
+                this.player.hp = 100;
+                this.player.armor = 100;
+                this.player.dead = false;
+                this.cancelReload();
+
+                // Reset Combat Stats for the new life
+                this.combatStats.dmgGiven = 0;
+                this.combatStats.hitsGiven = 0;
+                this.combatStats.dmgTaken = 0;
+                this.combatStats.hitsTaken = 0;
+
+                document.getElementById('death-screen-overlay').style.opacity = '0';
+                document.getElementById('respawn-banner').classList.add('hidden');
+                if (this.inMatch) {
+                    this.weaponContainer.visible = true;
+                }
+
+                this.weapons.ak47.clip = 30;
+                this.weapons.ak47.reserve = 90;
+                this.weapons.usps.clip = 12;
+                this.weapons.usps.reserve = 24;
+
+                const zSpawn = (Network.connected && !Network.isHost) ? -19 : 19;
+                const xSpawn = (Math.random() - 0.5) * 10;
+                this.player.pos.set(xSpawn, 0, zSpawn);
+                this.player.vel.set(0, 0, 0);
+
+                this.player.yaw = zSpawn > 0 ? 0 : Math.PI;
+                this.player.pitch = 0;
+                this.player.recoilPitch = 0;
+                this.camera.rotation.order = 'YXZ';
+                this.camera.rotation.set(0, this.player.yaw, 0, 'YXZ');
+
+                this.updateHUD();
+                Network.send({ type: 'respawn' });
+            },
+
+            spawnTracer(startVec, endVec, hexColor) {
+                const geom = new THREE.BufferGeometry().setFromPoints([startVec, endVec]);
+                const mat = new THREE.LineBasicMaterial({ color: hexColor, transparent: true, opacity: 0.88 });
+                const line = new THREE.Line(geom, mat);
+                this.scene.add(line);
+                setTimeout(() => {
+                    this.scene.remove(line);
+                    geom.dispose();
+                    mat.dispose();
+                }, 65);
+            },
+
+            spawnImpactParticles(point, normal, isBlood) {
+                if (!Settings.data.tracers) return;
+                const count = isBlood ? 7 : 5;
+                for (let i = 0; i < count; i++) {
+                    const size = isBlood ? 0.032 : 0.024;
+                    const color = isBlood ? (Math.random() > 0.3 ? 0xdc2626 : 0x991b1b) : (Math.random() > 0.4 ? 0xfbbf24 : 0x64748b);
+                    const geom = new THREE.BoxGeometry(size, size, size);
+                    const mat = new THREE.MeshBasicMaterial({ color });
+                    const mesh = new THREE.Mesh(geom, mat);
+                    mesh.position.copy(point).addScaledVector(normal, 0.03);
+
+                    const vel = new THREE.Vector3(
+                        normal.x * 2.2 + (Math.random() - 0.5) * 3.8,
+                        Math.abs(normal.y) * 2.5 + Math.random() * 3.2,
+                        normal.z * 2.2 + (Math.random() - 0.5) * 3.8
+                    );
+
+                    this.scene.add(mesh);
+                    this.particles.push({
+                        mesh,
+                        vel,
+                        age: 0,
+                        life: 0.28 + Math.random() * 0.22
+                    });
+                }
+            },
+
+            spawnShellCasing(muzzleWorld) {
+                const geom = new THREE.BoxGeometry(0.014, 0.014, 0.036);
+                const mat = new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 0.8, roughness: 0.3 });
+                const mesh = new THREE.Mesh(geom, mat);
+                mesh.position.copy(muzzleWorld);
+
+                const handSign = Settings.data.leftHand ? -1 : 1;
+                const rightVec = new THREE.Vector3(handSign, 0.4, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.player.yaw);
+                const vel = rightVec.multiplyScalar(2.4 + Math.random() * 1.2);
+
+                this.scene.add(mesh);
+                this.particles.push({
+                    mesh,
+                    vel,
+                    age: 0,
+                    life: 0.55
+                });
+            },
+
+            updateParticles(dt) {
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.age += dt;
+                    if (p.age >= p.life) {
+                        this.scene.remove(p.mesh);
+                        p.mesh.geometry.dispose();
+                        p.mesh.material.dispose();
+                        this.particles.splice(i, 1);
+                        continue;
+                    }
+                    p.vel.y -= 18.0 * dt;
+                    p.mesh.position.addScaledVector(p.vel, dt);
+                    p.mesh.rotation.x += 8 * dt;
+                    p.mesh.rotation.y += 6 * dt;
+
+                    if (p.mesh.position.y < 0.02) {
+                        p.mesh.position.y = 0.02;
+                        p.vel.y *= -0.35;
+                        p.vel.x *= 0.7;
+                        p.vel.z *= 0.7;
+                    }
+
+                    const scale = Math.max(0.05, 1 - (p.age / p.life));
+                    p.mesh.scale.setScalar(scale);
+                }
+            },
+
+            updateHUD() {
+                const p = this.player;
+                const w = this.weapons[p.activeWeapon];
+
+                document.getElementById('hud-hp-text').textContent = p.hp;
+                document.getElementById('hud-hp-bar').style.width = p.hp + '%';
+                document.getElementById('hud-armor-text').textContent = p.armor;
+                document.getElementById('hud-armor-bar').style.width = p.armor + '%';
+
+                document.getElementById('hud-ammo-clip').textContent = w.clip;
+                document.getElementById('hud-ammo-reserve').textContent = w.reserve;
+                document.getElementById('hud-weapon-name').textContent = w.name;
+                if (!p.reloading) {
+                    document.getElementById('hud-reload-state').textContent = w.subtitle;
+                }
+
+                document.getElementById('hud-kills').textContent = p.kills;
+                document.getElementById('hud-deaths').textContent = p.deaths;
+                document.getElementById('hud-score-local').textContent = p.kills;
+                document.getElementById('hud-score-enemy').textContent = p.deaths;
+            },
+
+            update(dt) {
+                const now = performance.now();
+
+                // CHANGE 8: In Main Menu flyover, ensure weaponContainer is hidden!
+                if (!this.inMatch) {
+                    this.weaponContainer.visible = false;
+                    const orbitYaw = now * 0.00025;
+                    this.camera.position.set(Math.sin(orbitYaw) * 18, 8.0, Math.cos(orbitYaw) * 18);
+                    this.camera.rotation.order = 'YXZ';
+                    this.camera.rotation.set(-0.38, orbitYaw, 0, 'YXZ');
+                    return;
+                }
+
+                if (this.isPaused) {
+                    this.camera.rotation.order = 'YXZ';
+                    this.camera.rotation.set(this.player.pitch, this.player.yaw, 0, 'YXZ');
+                    return;
+                }
+
+                const p = this.player;
+                const w = this.weapons[p.activeWeapon];
+
+                this.weaponContainer.visible = !p.dead;
+
+                this.updateReloadSystem(dt);
+                this.updateParticles(dt);
+
+                if (this.mouseDown && w.auto && this.pointerLocked && !p.dead && !p.reloading) {
+                    this.tryFireWeapon(false);
+                }
+
+                p.crouching = !!(this.keys['ControlLeft'] || this.keys['KeyC']);
+                const shiftWalk = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
+                const targetEyeHeight = p.dead ? 0.45 : (p.crouching ? 1.12 : 1.72);
+                p.height += (targetEyeHeight - p.height) * Math.min(1, dt * 12);
+
+                if (!p.dead && this.pointerLocked) {
+                    let moveF = 0;
+                    let moveR = 0;
+                    if (this.keys['KeyW'] || this.keys['ArrowUp']) moveF += 1;
+                    if (this.keys['KeyS'] || this.keys['ArrowDown']) moveF -= 1;
+                    if (this.keys['KeyD'] || this.keys['ArrowRight']) moveR += 1;
+                    if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveR -= 1;
+
+                    const len = Math.hypot(moveF, moveR);
+                    if (len > 0) {
+                        moveF /= len;
+                        moveR /= len;
+                    }
+
+                    let maxSpeed = 6.8;
+                    if (p.crouching) maxSpeed = 3.2;
+                    else if (shiftWalk) maxSpeed = 3.8;
+                    else if (p.activeWeapon === 'knife') maxSpeed = 7.9; // Fast running with knife!
+                    else if (p.activeWeapon === 'usps') maxSpeed = 7.3;
+
+                    const sinY = Math.sin(p.yaw);
+                    const cosY = Math.cos(p.yaw);
+
+                    const dirX = -sinY * moveF + cosY * moveR;
+                    const dirZ = -cosY * moveF - sinY * moveR;
+
+                    p.vel.x = dirX * maxSpeed;
+                    p.vel.z = dirZ * maxSpeed;
+                } else {
+                    p.vel.x *= 0.8;
+                    p.vel.z *= 0.8;
+                }
+
+                p.vel.y -= 21.0 * dt;
+
+                const nextX = p.pos.x + p.vel.x * dt;
+                if (!this.checkCollision(nextX, p.pos.y, p.pos.z, p.radius, p.height)) {
+                    p.pos.x = nextX;
+                } else {
+                    p.vel.x = 0;
+                }
+
+                const nextZ = p.pos.z + p.vel.z * dt;
+                if (!this.checkCollision(p.pos.x, p.pos.y, nextZ, p.radius, p.height)) {
+                    p.pos.z = nextZ;
+                } else {
+                    p.vel.z = 0;
+                }
+
+                const nextY = p.pos.y + p.vel.y * dt;
+                if (nextY <= 0) {
+                    p.pos.y = 0;
+                    p.vel.y = 0;
+                    p.grounded = true;
+                } else {
+                    const supportY = this.getSupportHeight(p.pos.x, nextY, p.pos.z, p.radius);
+                    if (supportY !== null && p.vel.y <= 0 && p.pos.y >= supportY - 0.15) {
+                        p.pos.y = supportY;
+                        p.vel.y = 0;
+                        p.grounded = true;
+                    } else {
+                        p.pos.y = nextY;
+                        p.grounded = false;
+                    }
+                }
+
+                const horizSpeed = Math.hypot(p.vel.x, p.vel.z);
+                if (p.grounded && horizSpeed > 4.2 && !shiftWalk && !p.crouching) {
+                    p.stepAccumulator += horizSpeed * dt;
+                    if (p.stepAccumulator > 2.4) {
+                        p.stepAccumulator = 0;
+                        SoundFX.playFootstep();
+                    }
+                }
+
+                const maxPitch = Math.PI * 0.47;
+                p.pitch = Math.max(-maxPitch, Math.min(maxPitch, p.pitch));
+                this.camera.position.set(p.pos.x, p.pos.y + p.height, p.pos.z);
+                this.camera.up.set(0, 1, 0);
+                this.camera.rotation.order = 'YXZ';
+                this.camera.rotation.set(p.pitch, p.yaw, 0, 'YXZ');
+
+                p.recoilPitch = Math.max(0, p.recoilPitch - dt * 0.12);
+                p.dynamicSpread = Math.max(0, p.dynamicSpread - dt * 32);
+                Settings.updateCrosshairDOM(p.dynamicSpread + horizSpeed * 0.7);
+
+                this.animateViewmodel(dt, horizSpeed, now);
+                this.updateEnemyEntity(dt, now);
+
+                if (Network.connected && now - this.lastNetSend > 33) {
+                    this.lastNetSend = now;
+                    Network.send({
+                        type: 'state',
+                        x: Number(p.pos.x.toFixed(2)),
+                        y: Number(p.pos.y.toFixed(2)),
+                        z: Number(p.pos.z.toFixed(2)),
+                        yaw: Number(p.yaw.toFixed(3)),
+                        weapon: p.activeWeapon,
+                        hp: p.hp
+                    });
+                }
+            },
+
+            checkCollision(x, y, z, r, h) {
+                for (let i = 0; i < this.colliders.length; i++) {
+                    const c = this.colliders[i];
+                    if (y + 0.15 < c.maxY && y + h > c.minY) {
+                        if (x + r > c.minX && x - r < c.maxX && z + r > c.minZ && z - r < c.maxZ) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            },
+
+            getSupportHeight(x, y, z, r) {
+                let bestY = null;
+                for (let i = 0; i < this.colliders.length; i++) {
+                    const c = this.colliders[i];
+                    if (x + r > c.minX && x - r < c.maxX && z + r > c.minZ && z - r < c.maxZ) {
+                        if (y <= c.maxY && y >= c.maxY - 0.5) {
+                            if (bestY === null || c.maxY > bestY) bestY = c.maxY;
+                        }
+                    }
+                }
+                return bestY;
+            },
+
+            animateViewmodel(dt, speed, now) {
+                const handSign = Settings.data.leftHand ? -1 : 1;
+                this.weaponContainer.scale.x = handSign;
+
+                const activeModel = this.models[this.player.activeWeapon];
+                const basePos = this.player.activeWeapon === 'ak47'
+                    ? { x: 0.24, y: -0.22, z: -0.42 }
+                    : (this.player.activeWeapon === 'usps'
+                        ? { x: 0.22, y: -0.20, z: -0.38 }
+                        : { x: 0.21, y: -0.19, z: -0.34 });
+
+                const bobX = Math.cos(now * 0.009) * 0.008 * (speed / 6.5);
+                const bobY = Math.abs(Math.sin(now * 0.018)) * 0.012 * (speed / 6.5);
+
+                const swayDecay = Math.pow(0.88, dt * 60);
+                this.swayX *= swayDecay;
+                this.swayY *= swayDecay;
+
+                let slashOffsetX = 0;
+                let slashOffsetY = 0;
+                let slashOffsetZ = 0;
+                let targetRotX = this.player.activeWeapon === 'knife' ? 0.18 : 0;
+                let targetRotY = this.player.activeWeapon === 'knife' ? -0.32 : 0;
+                let targetRotZ = this.player.activeWeapon === 'knife' ? 0.28 : 0;
+
+                // Knife Slash / Heavy Stab Animation
+                if (this.player.activeWeapon === 'knife' && this.player.knifeSwingTimer > 0) {
+                    this.player.knifeSwingTimer = Math.max(0, this.player.knifeSwingTimer - dt);
+                    const totalDur = this.player.knifeSwingType === 'heavy' ? 0.38 : 0.24;
+                    const phase = 1 - (this.player.knifeSwingTimer / totalDur);
+                    const arc = Math.sin(phase * Math.PI);
+
+                    if (this.player.knifeSwingType === 'heavy') {
+                        slashOffsetZ = -0.19 * arc;
+                        slashOffsetX = -0.06 * arc;
+                        targetRotX = -0.45 * arc;
+                        targetRotY = -0.10;
+                    } else {
+                        slashOffsetX = -0.18 * Math.sin(phase * Math.PI * 1.2);
+                        slashOffsetZ = -0.09 * arc;
+                        targetRotY = -0.25 + 0.85 * arc;
+                        targetRotZ = 0.10 - 0.65 * arc;
+                    }
+                }
+
+                activeModel.position.x += (basePos.x + bobX + slashOffsetX + this.swayX * handSign - activeModel.position.x) * Math.min(1, dt * 16);
+                activeModel.position.y += (basePos.y - bobY + slashOffsetY + this.swayY - activeModel.position.y) * Math.min(1, dt * 16);
+                activeModel.position.z += (basePos.z + slashOffsetZ - activeModel.position.z) * Math.min(1, dt * 16);
+
+                const magMesh = activeModel.userData.magMesh;
+                const boltGroup = activeModel.userData.boltGroup;
+
+                if (this.player.reloading && !this.weapons[this.player.activeWeapon].melee) {
+                    const p = Math.min(1, this.player.reloadElapsed / this.player.reloadDuration);
+
+                    if (p < 0.38) {
+                        const t = p / 0.38;
+                        targetRotX = 0.20 * Math.sin(t * Math.PI * 0.5);
+                        targetRotZ = 0.38 * Math.sin(t * Math.PI * 0.5);
+                        if (magMesh) {
+                            magMesh.position.y = magMesh.userData.basePos.y - t * 0.26;
+                            magMesh.position.z = magMesh.userData.basePos.z + t * 0.05;
+                        }
+                    } else if (p < 0.72) {
+                        const t = (p - 0.38) / 0.34;
+                        targetRotX = 0.20;
+                        targetRotZ = 0.38;
+                        if (magMesh) {
+                            const easeOut = 1 - Math.pow(1 - t, 3);
+                            magMesh.position.y = (magMesh.userData.basePos.y - 0.26) + easeOut * 0.26;
+                            magMesh.position.z = (magMesh.userData.basePos.z + 0.05) - easeOut * 0.05;
+                        }
+                        if (t > 0.75) activeModel.position.y += 0.006;
+                    } else {
+                        const t = (p - 0.72) / 0.28;
+                        targetRotX = 0.08 * (1 - t);
+                        targetRotZ = -0.18 * Math.sin(t * Math.PI);
+                        if (magMesh) {
+                            magMesh.position.copy(magMesh.userData.basePos);
+                        }
+                        if (boltGroup) {
+                            const pullDist = this.player.activeWeapon === 'ak47' ? 0.095 : 0.058;
+                            const rackCurve = t < 0.55 ? (t / 0.55) : (1 - (t - 0.55) / 0.45);
+                            boltGroup.position.z = boltGroup.userData.baseZ + Math.max(0, rackCurve) * pullDist;
+                        }
+                    }
+                } else {
+                    if (magMesh) {
+                        magMesh.position.copy(magMesh.userData.basePos);
+                    }
+                    if (boltGroup) {
+                        boltGroup.position.z += (boltGroup.userData.baseZ - boltGroup.position.z) * Math.min(1, dt * 20);
+                    }
+                    if (this.player.inspectTimer > 0) {
+                        this.player.inspectTimer -= dt;
+                        targetRotZ += Math.sin(this.player.inspectTimer * 4) * 0.52;
+                        targetRotX += 0.18;
+                    }
+                }
+
+                activeModel.rotation.x += (targetRotX - activeModel.rotation.x) * Math.min(1, dt * 14);
+                activeModel.rotation.y += (targetRotY - activeModel.rotation.y) * Math.min(1, dt * 14);
+                activeModel.rotation.z += (targetRotZ - activeModel.rotation.z) * Math.min(1, dt * 14);
+                this.weaponContainer.position.y += (0 - this.weaponContainer.position.y) * Math.min(1, dt * 10);
+            },
+
+            updateEnemyEntity(dt, now) {
+                const rp = this.remotePlayer;
+                if (!rp.mesh || rp.dead) return;
+
+                if (Network.connected) {
+                    rp.pos.lerp(rp.targetPos, Math.min(1, dt * 14));
+                    rp.yaw += (rp.targetYaw - rp.yaw) * Math.min(1, dt * 14);
+                    rp.mesh.visible = true;
+                    rp.mesh.position.copy(rp.pos);
+                    rp.mesh.rotation.y = rp.yaw;
+                    return;
+                }
+
+                if (!this.botEnabled) {
+                    rp.mesh.visible = false;
+                    return;
+                }
+
+                const diffMap = {
+                    easy:   { speed: 3.8, reactTime: 0.55, fireInterval: 520, hitChance: 0.22, hsChance: 0.05, dmg: 14 },
+                    normal: { speed: 4.9, reactTime: 0.32, fireInterval: 310, hitChance: 0.38, hsChance: 0.12, dmg: 20 },
+                    hard:   { speed: 5.7, reactTime: 0.18, fireInterval: 210, hitChance: 0.54, hsChance: 0.20, dmg: 26 },
+                    pro:    { speed: 6.4, reactTime: 0.09, fireInterval: 145, hitChance: 0.70, hsChance: 0.32, dmg: 32 }
+                };
+                const cfg = diffMap[Settings.data.botDifficulty] || diffMap.normal;
+
+                const botEyes = new THREE.Vector3(rp.pos.x, rp.pos.y + 1.62, rp.pos.z);
+                const playerEyes = new THREE.Vector3(this.player.pos.x, this.player.pos.y + this.player.height - 0.15, this.player.pos.z);
+                const toPlayer = playerEyes.clone().sub(botEyes);
+                const distToPlayer = toPlayer.length();
+                const dirToPlayer = toPlayer.clone().normalize();
+
+                const losRay = new THREE.Raycaster(botEyes, dirToPlayer, 0.2, distToPlayer);
+                const wallHits = losRay.intersectObjects(this.worldMeshes, false);
+                rp.hasLOS = (wallHits.length === 0) && !this.player.dead;
+
+                let moveX = 0;
+                let moveZ = 0;
+
+                if (rp.hasLOS) {
+                    rp.aiState = 'ENGAGE';
+                    rp.losSeeTime += dt;
+
+                    const desiredYaw = Math.atan2(this.player.pos.x - rp.pos.x, this.player.pos.z - rp.pos.z) + Math.PI;
+                    let diffYaw = desiredYaw - rp.yaw;
+                    while (diffYaw > Math.PI) diffYaw -= Math.PI * 2;
+                    while (diffYaw < -Math.PI) diffYaw += Math.PI * 2;
+                    rp.yaw += diffYaw * Math.min(1, dt * 12);
+
+                    rp.strafeTimer += dt;
+                    if (rp.strafeTimer > 0.9 + Math.random() * 0.8) {
+                        rp.strafeTimer = 0;
+                        rp.strafeDir *= -1;
+                        rp.crouching = Math.random() < 0.28;
+                    }
+
+                    const perpX = -dirToPlayer.z * rp.strafeDir;
+                    const perpZ = dirToPlayer.x * rp.strafeDir;
+                    let forwardPush = 0;
+                    if (distToPlayer > 17) forwardPush = 0.65;
+                    else if (distToPlayer < 7) forwardPush = -0.5;
+
+                    moveX = (perpX * 0.85 + dirToPlayer.x * forwardPush) * cfg.speed;
+                    moveZ = (perpZ * 0.85 + dirToPlayer.z * forwardPush) * cfg.speed;
+
+                    if (rp.losSeeTime >= cfg.reactTime && (now - rp.botLastShot) >= cfg.fireInterval) {
+                        rp.botLastShot = now;
+                        SoundFX.playGunshot('ak47', distToPlayer);
+
+                        const distPenalty = Math.max(0.45, 1 - distToPlayer / 55);
+                        const playerMovingPenalty = Math.hypot(this.player.vel.x, this.player.vel.z) > 4 ? 0.82 : 1.0;
+                        const effectiveHitChance = cfg.hitChance * distPenalty * playerMovingPenalty;
+
+                        const muzzlePos = rp.pos.clone().add(new THREE.Vector3(0, 1.38, 0));
+
+                        if (Math.random() < effectiveHitChance) {
+                            const isHead = Math.random() < cfg.hsChance;
+                            const finalDmg = isHead ? Math.round(cfg.dmg * 1.8) : cfg.dmg;
+                            const hitTarget = playerEyes.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.2, -0.2, (Math.random() - 0.5) * 0.2));
+                            this.spawnTracer(muzzlePos, hitTarget, 0xef4444);
+                            this.applyDamageToLocal(finalDmg, rp.name, 'ak47', isHead);
+                        } else {
+                            const missOffset = new THREE.Vector3((Math.random() - 0.5) * 2.2, (Math.random() - 0.5) * 1.4, (Math.random() - 0.5) * 2.2);
+                            const missPoint = playerEyes.clone().add(missOffset);
+                            this.spawnTracer(muzzlePos, missPoint, 0xf59e0b);
+                        }
+                    }
+                } else {
+                    rp.aiState = 'HUNT';
+                    rp.losSeeTime = Math.max(0, rp.losSeeTime - dt * 2);
+                    rp.crouching = false;
+
+                    const wp = this.botWaypoints[rp.waypointIdx] || this.botWaypoints[0];
+                    const dx = wp.x - rp.pos.x;
+                    const dz = wp.z - rp.pos.z;
+                    const distWp = Math.hypot(dx, dz);
+
+                    if (distWp < 1.6) {
+                        let bestIdx = (rp.waypointIdx + 1) % this.botWaypoints.length;
+                        let bestScore = Infinity;
+                        for (let i = 0; i < this.botWaypoints.length; i++) {
+                            if (i === rp.waypointIdx) continue;
+                            const candidate = this.botWaypoints[i];
+                            const dBot = candidate.distanceTo(rp.pos);
+                            const dPlr = candidate.distanceTo(this.player.pos);
+                            if (dBot < 22) {
+                                const score = dPlr + Math.random() * 6;
+                                if (score < bestScore) {
+                                    bestScore = score;
+                                    bestIdx = i;
+                                }
+                            }
+                        }
+                        rp.waypointIdx = bestIdx;
+                    } else {
+                        moveX = (dx / distWp) * cfg.speed;
+                        moveZ = (dz / distWp) * cfg.speed;
+                        const desiredYaw = Math.atan2(dx, dz) + Math.PI;
+                        let diffYaw = desiredYaw - rp.yaw;
+                        while (diffYaw > Math.PI) diffYaw -= Math.PI * 2;
+                        while (diffYaw < -Math.PI) diffYaw += Math.PI * 2;
+                        rp.yaw += diffYaw * Math.min(1, dt * 8);
+                    }
+                }
+
+                const botR = 0.45;
+                let moved = false;
+                const nextBotX = rp.pos.x + moveX * dt;
+                if (!this.checkCollision(nextBotX, 0, rp.pos.z, botR, 1.8) && Math.abs(nextBotX) < 23.5) {
+                    rp.pos.x = nextBotX;
+                    moved = true;
+                } else {
+                    rp.strafeDir *= -1;
+                }
+
+                const nextBotZ = rp.pos.z + moveZ * dt;
+                if (!this.checkCollision(rp.pos.x, 0, nextBotZ, botR, 1.8) && Math.abs(nextBotZ) < 23.5) {
+                    rp.pos.z = nextBotZ;
+                    moved = true;
+                } else {
+                    rp.waypointIdx = (rp.waypointIdx + 1) % this.botWaypoints.length;
+                }
+
+                rp.mesh.visible = true;
+                rp.mesh.position.copy(rp.pos);
+                rp.mesh.scale.y = rp.crouching ? 0.78 : 1.0;
+                rp.mesh.rotation.y = rp.yaw;
+
+                const swing = moved ? Math.sin(now * 0.012) * 0.42 : 0;
+                rp.mesh.userData.leftLeg.rotation.x = swing;
+                rp.mesh.userData.rightLeg.rotation.x = -swing;
+            },
+
+            /**
+             * CHANGE 4: Uncapped / Custom `fps_max` Game Loop
+             */
+            loop() {
+                if (this.loopRunning) return;
+                this.loopRunning = true;
+                this.lastFrameTime = performance.now();
+                this.scheduleNextFrame();
+            },
+
+            scheduleNextFrame() {
+                if (Settings.data.vsync || document.hidden) {
+                    requestAnimationFrame(() => this.tickLoop());
+                } else {
+                    const fpsMax = Settings.data.fpsMax;
+                    if (fpsMax > 0 && fpsMax <= 90) {
+                        const targetInterval = 1000 / fpsMax;
+                        const elapsed = performance.now() - this.lastFrameTime;
+                        const wait = Math.max(0, targetInterval - elapsed - 1.5);
+                        if (wait > 2) {
+                            setTimeout(() => this.loopChannel.port2.postMessage(null), wait);
+                            return;
+                        }
+                    }
+                    this.loopChannel.port2.postMessage(null);
+                }
+            },
+
+            tickLoop() {
+                const now = performance.now();
+                const fpsMax = Settings.data.fpsMax;
+
+                if (fpsMax > 0) {
+                    const minFrameInterval = 1000 / fpsMax;
+                    const rawElapsed = now - this.lastFrameTime;
+                    if (rawElapsed < minFrameInterval - 0.15) {
+                        this.scheduleNextFrame();
+                        return;
+                    }
+                }
+
+                const rawFrameMs = now - this.lastFrameTime;
+                this.frameMs = rawFrameMs;
+                const dt = Math.max(0.0005, Math.min(0.05, rawFrameMs / 1000));
+                this.lastFrameTime = now;
+
+                this.frameCount++;
+                if (now - this.lastFpsUpdate >= 400) {
+                    this.fps = Math.round((this.frameCount * 1000) / (now - this.lastFpsUpdate));
+                    this.frameCount = 0;
+                    this.lastFpsUpdate = now;
+
+                    document.getElementById('hud-fps').textContent = this.fps;
+                    UI.updateDebugTelemetry(this.frameMs);
+                }
+
+                this.update(dt);
+                this.renderer.render(this.scene, this.camera);
+
+                this.scheduleNextFrame();
+            }
+        };
+
+        /******************************************************************
+         * 7. UI CONTROLLER (CS2 Death Card, Non-Blocking Debug, Killfeed)
+         ******************************************************************/
+        const UI = {
+            hitmarkerTimeout: null,
+            isSettingsOpen: false,
+
+            /**
+             * CHANGE 3: Toggle Debug Menu WITHOUT unlocking cursor or pausing game!
+             */
+            toggleDebug() {
+                const panel = document.getElementById('debug-panel');
+                const isHidden = panel.classList.contains('hidden');
+                if (isHidden) {
+                    panel.classList.remove('hidden');
+                    panel.classList.add('flex');
+                } else {
+                    panel.classList.add('hidden');
+                    panel.classList.remove('flex');
+                }
+                // Intentionally do NOT call exitPointerLock() so the player can keep playing with Debug open
+            },
+
+            openSettings() {
+                if (document.pointerLockElement) document.exitPointerLock();
+                this.isSettingsOpen = true;
+                const modal = document.getElementById('settings-modal');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                Game.updatePauseState();
+            },
+
+            closeSettings(resumeGame = false) {
+                this.isSettingsOpen = false;
+                const modal = document.getElementById('settings-modal');
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                Game.updatePauseState();
+                if (resumeGame && Game.inMatch) {
+                    Game.requestPointerLock();
+                }
+            },
+
+            returnToMainMenu() {
+                this.closeSettings(false);
+                if (document.pointerLockElement) document.exitPointerLock();
+                Game.inMatch = false;
+                Game.isPaused = false;
+                if (Game.weaponContainer) Game.weaponContainer.visible = false;
+                document.getElementById('death-screen-overlay').style.opacity = '0';
+                document.getElementById('respawn-banner').classList.add('hidden');
+                document.getElementById('hud-layer').classList.add('hidden');
+                document.getElementById('pause-overlay').classList.add('hidden');
+                document.getElementById('main-menu').classList.remove('hidden');
+            },
+
+            showHitmarker(isHeadshot) {
+                const hm = document.getElementById('hitmarker');
+                const lines = hm.querySelectorAll('.hit-line');
+                lines.forEach(l => {
+                    l.style.backgroundColor = isHeadshot ? '#ef4444' : '#ffffff';
+                    l.style.height = isHeadshot ? '3px' : '2px';
+                });
+                hm.style.opacity = '1';
+                clearTimeout(this.hitmarkerTimeout);
+                this.hitmarkerTimeout = setTimeout(() => {
+                    hm.style.opacity = '0';
+                }, 150);
+            },
+
+            spawnFloatingDamage(dmg, isHead, worldPos) {
+                const container = document.getElementById('floating-dmg-container');
+                const projected = worldPos.clone().project(Game.camera);
+                const x = (projected.x * 0.5 + 0.5) * window.innerWidth;
+                const y = (-(projected.y * 0.5) + 0.5) * window.innerHeight;
+
+                const el = document.createElement('div');
+                el.className = `floating-dmg ${isHead ? 'text-2xl text-red-400' : 'text-lg text-amber-300'}`;
+                el.style.left = `${x}px`;
+                el.style.top = `${y}px`;
+                el.textContent = isHead ? `🎯 -${dmg} HEADSHOT!` : `-${dmg}`;
+                container.appendChild(el);
+                setTimeout(() => el.remove(), 850);
+            },
+
+            flashDamageVignette() {
+                const v = document.getElementById('damage-vignette');
+                v.style.opacity = '1';
+                setTimeout(() => { v.style.opacity = '0'; }, 240);
+            },
+
+            flashKillEffect() {
+                const f = document.getElementById('kill-flash');
+                f.style.opacity = '1';
+                setTimeout(() => { f.style.opacity = '0'; }, 280);
+            },
+
+            /**
+             * CHANGE 1: Populates and displays the CS2/CS:GO Red-Black Death Screen & Death Card
+             */
+            showDeathScreen(killerName, weaponKey, isHead, stats) {
+                const overlay = document.getElementById('death-screen-overlay');
+                overlay.style.opacity = '1';
+
+                const wObj = Game.weapons[weaponKey] || Game.weapons.ak47;
+                document.getElementById('death-killer-name').textContent = killerName;
+                document.getElementById('death-weapon-name').textContent = wObj.shortName || 'AK-47';
+                document.getElementById('death-weapon-sub').textContent = `${wObj.shortName} | TACTICAL`;
+
+                const hsTag = document.getElementById('death-headshot-tag');
+                if (isHead) hsTag.classList.remove('hidden');
+                else hsTag.classList.add('hidden');
+
+                document.getElementById('death-dmg-taken').textContent = stats.dmgTaken;
+                document.getElementById('death-hits-taken').textContent = stats.hitsTaken;
+                document.getElementById('death-dmg-given').textContent = stats.dmgGiven;
+                document.getElementById('death-hits-given').textContent = stats.hitsGiven;
+
+                const svgBox = document.getElementById('death-weapon-svg-box');
+                if (weaponKey === 'ak47') {
+                    svgBox.innerHTML = `
+                        <svg class="w-40 h-16" viewBox="0 0 180 56">
+                            <!-- Buttstock & Handguard (Wood) -->
+                            <path d="M138 22 L174 26 L172 39 L136 29 Z" fill="#854d27" stroke="#111" stroke-width="1"/>
+                            <path d="M52 19 L84 19 L84 26 L54 25 Z" fill="#854d27" stroke="#111" stroke-width="1"/>
+                            <!-- Barrel & Receiver (Steel) -->
+                            <path d="M8 20 L54 20 L54 23 L8 23 Z" fill="#94a3b8"/>
+                            <path d="M22 14 L25 14 L26 20 L21 20 Z" fill="#475569"/>
+                            <path d="M82 17 L138 18 L138 28 L82 28 Z" fill="#334155" stroke="#cbd5e1" stroke-width="0.8"/>
+                            <!-- Curved Bakelite Magazine -->
+                            <path d="M88 28 L100 28 L92 50 L80 48 Z" fill="#c2591b" stroke="#111" stroke-width="1"/>
+                            <!-- Pistol Grip -->
+                            <path d="M122 28 L131 28 L127 42 L118 41 Z" fill="#7c3f16"/>
+                        </svg>`;
+                } else if (weaponKey === 'usps') {
+                    svgBox.innerHTML = `
+                        <svg class="w-36 h-16" viewBox="0 0 150 56">
+                            <!-- Suppressor -->
+                            <rect x="10" y="18" width="52" height="9" rx="2" fill="#334155" stroke="#94a3b8" stroke-width="0.8"/>
+                            <!-- Slide -->
+                            <rect x="62" y="16" width="54" height="12" rx="2" fill="#475569" stroke="#cbd5e1" stroke-width="0.8"/>
+                            <!-- Grip -->
+                            <path d="M92 28 L112 28 L104 49 L85 48 Z" fill="#1e293b" stroke="#64748b" stroke-width="0.8"/>
+                        </svg>`;
+                } else {
+                    svgBox.innerHTML = `
+                        <svg class="w-36 h-16" viewBox="0 0 150 56">
+                            <path d="M15 26 L85 20 L85 32 L25 32 Z" fill="#e2e8f0" stroke="#dc2626" stroke-width="1.2"/>
+                            <rect x="85" y="14" width="6" height="26" rx="1" fill="#475569"/>
+                            <rect x="91" y="21" width="42" height="12" rx="3" fill="#1e293b" stroke="#64748b" stroke-width="1"/>
+                        </svg>`;
+                }
+
+                document.getElementById('respawn-banner').classList.remove('hidden');
+            },
+
+            addKillfeedEntry(killer, victim, weaponKey, isHead) {
+                const container = document.getElementById('killfeed-container');
+                const div = document.createElement('div');
+                div.className = `killfeed-item bg-slate-950/90 backdrop-blur-md px-4 py-2 rounded-lg flex items-center gap-3 shadow-2xl border ${isHead ? 'border-red-500/70 shadow-red-950/40' : 'border-white/20'}`;
+
+                let weaponSvg = '';
+                if (weaponKey === 'ak47') {
+                    weaponSvg = `<svg class="w-14 h-5 fill-slate-200 shrink-0" viewBox="0 0 120 36"><path d="M5 18 L24 14 L32 14 L35 10 L75 10 L82 13 L108 13 L112 9 L115 9 L115 16 L84 16 L76 19 L65 19 L72 33 L63 34 L55 20 L42 20 L38 28 L32 28 L35 19 L24 20 L6 25 Z"/></svg>`;
+                } else if (weaponKey === 'usps') {
+                    weaponSvg = `<svg class="w-12 h-5 fill-slate-200 shrink-0" viewBox="0 0 100 36"><path d="M18 12 L58 12 L58 14 L94 14 L94 19 L58 19 L58 21 L36 21 L30 33 L20 33 L25 21 L18 21 Z"/></svg>`;
+                } else {
+                    weaponSvg = `<svg class="w-12 h-5 fill-slate-200 shrink-0" viewBox="0 0 100 36"><path d="M12 16 L40 16 L40 10 L45 10 L45 15 L88 13 L95 18 L82 22 L45 22 L45 27 L40 27 L40 21 L12 21 Z"/></svg>`;
+                }
+
+                const headshotBadge = isHead
+                    ? `<div class="flex items-center gap-1 bg-red-500/25 border border-red-500/60 px-2 py-0.5 rounded text-red-400 font-tactical font-extrabold text-xs tracking-wider">
+                        <svg class="w-4 h-4 fill-red-400 shrink-0" viewBox="0 0 24 24">
+                            <path d="M12 2C7.58 2 4 5.58 4 10c0 2.76 1.4 5.19 3.53 6.62V19c0 .55.45 1 1 1h7c.55 0 1-.45 1-1v-2.38C18.6 15.19 20 12.76 20 10c0-4.42-3.58-8-8-8zm-3 9c-.83 0-1.5-.67-1.5-1.5S8.17 8 9 8s1.5.67 1.5 1.5S9.83 11 9 11zm6 0c-.83 0-1.5-.67-1.5-1.5S14.17 8 15 8s1.5.67 1.5 1.5S15.83 11 15 11zm-3 3.5l-1.5-2h3l-1.5 2z"/>
+                            <circle cx="12" cy="10" r="9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2"/>
+                        </svg>
+                        <span>HS</span>
+                       </div>`
+                    : '';
+
+                div.innerHTML = `
+                    <span class="font-tactical font-extrabold text-base tracking-wide text-sky-400">${DebugLogger.escapeHTML(killer)}</span>
+                    <div class="flex items-center gap-1.5">
+                        ${weaponSvg}
+                        ${headshotBadge}
+                    </div>
+                    <span class="font-tactical font-extrabold text-base tracking-wide text-amber-400">${DebugLogger.escapeHTML(victim)}</span>
+                `;
+                container.appendChild(div);
+                setTimeout(() => div.remove(), 6000);
+            },
+
+            updateDebugTelemetry(frameMs) {
+                const p = Game.player;
+                const yawDeg = Math.round((p.yaw * 180 / Math.PI) % 360);
+                const pitchDeg = Math.round(p.pitch * 180 / Math.PI);
+                const rollZ = Game.camera ? Game.camera.rotation.z.toFixed(2) : '0.00';
+                const capLabel = Settings.data.vsync ? 'VSYNC' : `${Settings.data.fpsMax} CAP`;
+
+                document.getElementById('dbg-fps').textContent = `${Game.fps} FPS (${frameMs.toFixed(1)}ms | ${capLabel})`;
+                document.getElementById('dbg-pos').textContent = `${yawDeg}°, ${pitchDeg}°, Z:${rollZ}`;
+                document.getElementById('dbg-net').textContent = Network.connected
+                    ? `ONLINE #${Network.roomCode} (${Network.pingMs}ms)`
+                    : `${Game.remotePlayer.aiState} (LOS: ${Game.remotePlayer.hasLOS ? 'YES' : 'NO'})`;
+                document.getElementById('dbg-packets').textContent = `${Network.txPerSec}/s • ${Network.rxPerSec}/s • E:${DebugLogger.errorCount}`;
+            }
+        };
+
+        /******************************************************************
+         * 8. BOOTSTRAP APPLICATION ON WINDOW LOAD
+         ******************************************************************/
+        window.onload = function () {
+            DebugLogger.init();
+            Settings.init();
+            Network.initMetricsLoop();
+            Game.init();
+            Game.loop();
+        };
+    </script>
+</body>
+</html>
